@@ -1,12 +1,11 @@
 import asyncio
 import json
-import math
 import shutil
-import struct
 import subprocess
 import time
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -31,27 +30,30 @@ class PerceptionPipeline:
 
     def __init__(self) -> None:
         self.frame_count = 0
+        x = np.arange(GRID_X, dtype=np.float32)
+        y = np.arange(GRID_Y, dtype=np.float32)
+        z = np.arange(GRID_Z, dtype=np.float32)
+        self.xx, self.yy, self.zz = np.meshgrid(x, y, z, indexing="ij")
+        self.nx = (self.xx - 16.0) / 16.0
+        self.ny = (self.yy - 16.0) / 16.0
 
     def generate_occupancy_tensor(self, threshold: float = 0.4) -> bytes:
         self.frame_count += 1
-        time_factor = self.frame_count * 0.1
+        time_factor = np.float32(self.frame_count * 0.1)
+        prob = (np.sin(self.nx * 3.0 + time_factor) * np.cos(self.ny * 3.0 + time_factor) + 1.0) / 2.0
+        mask = prob >= np.float32(threshold)
 
-        binary_data = bytearray()
-        active_count = 0
+        packed = np.column_stack(
+            (
+                self.xx[mask] - 16.0,
+                self.yy[mask] - 16.0,
+                self.zz[mask],
+                prob[mask],
+            )
+        ).astype(np.float32, copy=False)
 
-        for z in range(GRID_Z):
-            for y in range(GRID_Y):
-                for x in range(GRID_X):
-                    nx, ny, nz = (x - 16) / 16.0, (y - 16) / 16.0, z / 16.0
-                    prob = (math.sin(nx * 3.0 + time_factor) * math.cos(ny * 3.0 + time_factor) + 1.0) / 2.0
-                    if prob >= threshold:
-                        binary_data.extend(
-                            struct.pack("<ffff", float(x - 16), float(y - 16), float(z), prob)
-                        )
-                        active_count += 1
-
-        header = struct.pack("<I", active_count)
-        return header + binary_data
+        header = np.array([packed.shape[0]], dtype=np.uint32)
+        return header.tobytes() + packed.tobytes()
 
 
 pipeline = PerceptionPipeline()

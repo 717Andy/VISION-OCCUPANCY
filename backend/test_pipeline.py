@@ -1,5 +1,6 @@
 import math
 import struct
+import time
 import unittest
 
 from main import PerceptionPipeline
@@ -34,6 +35,16 @@ class OccupancyTensorTests(unittest.TestCase):
             self.assertGreaterEqual(prob, 0.1)
             self.assertLessEqual(prob, 1.0)
             self.assertTrue(math.isfinite(prob))
+
+
+    def test_vectorized_generation_is_realtime(self):
+        pipeline = PerceptionPipeline()
+        pipeline.generate_occupancy_tensor(threshold=0.38)  # warmup
+        start = time.perf_counter()
+        for _ in range(10):
+            pipeline.generate_occupancy_tensor(threshold=0.38)
+        elapsed = (time.perf_counter() - start) / 10
+        self.assertLess(elapsed, 0.02, f"occupancy generation took {elapsed:.4f}s")
 
 
 class ManifestPathTests(unittest.TestCase):
