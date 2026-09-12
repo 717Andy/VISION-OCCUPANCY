@@ -45,7 +45,6 @@ const DEFAULT_CONTROLS: ControlsState = {
 };
 
 export const App: React.FC = () => {
-  const [voxels, setVoxels] = useState<VoxelData[]>([]);
   const [controls, setControls] = useState<ControlsState>(DEFAULT_CONTROLS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selected, setSelected] = useState<SelectedVoxel | null>(null);
@@ -56,10 +55,14 @@ export const App: React.FC = () => {
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
 
+  const voxelsRef = useRef<VoxelData[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const frameCountRef = useRef(0);
   const lastTimeRef = useRef(performance.now());
   const sendTimeRef = useRef(performance.now());
+  const latencySumRef = useRef(0);
+  const pendingFrameRef = useRef<ArrayBuffer | null>(null);
+  const rafRef = useRef<number>(0);
   const thresholdRef = useRef(controls.threshold);
   thresholdRef.current = controls.threshold;
 
@@ -82,36 +85,54 @@ export const App: React.FC = () => {
       ws.send(JSON.stringify({ threshold: thresholdRef.current, paused: false }));
     };
 
-    ws.onmessage = (event: MessageEvent) => {
+    const consumeFrame = (buffer: ArrayBuffer) => {
       const receiveTime = performance.now();
-      setLatencyMs(receiveTime - sendTimeRef.current);
-      sendTimeRef.current = receiveTime;
-
-      if (!(event.data instanceof ArrayBuffer)) return;
-      const view = new DataView(event.data);
-      const count = view.getUint32(0, true);
-      const voxelList: VoxelData[] = [];
-      let offset = 4;
-      for (let i = 0; i < count; i++) {
-        const x = view.getFloat32(offset, true);
-        const y = view.getFloat32(offset + 4, true);
-        const z = view.getFloat32(offset + 8, true);
-        const prob = view.getFloat32(offset + 12, true);
-        offset += 16;
-        voxelList.push({ x, y, z, prob, cls: classifyVoxel(x, y, z, prob) });
+      const count = new Uint32Array(buffer, 0, 1)[0];
+      const floats = new Float32Array(buffer, 4, count * 4);
+      const stride = Math.max(1, Math.ceil(count / 900));
+      const kept = Math.ceil(count / stride);
+      const voxelList: VoxelData[] = new Array(kept);
+      let written = 0;
+      for (let i = 0; i < count; i += stride) {
+        const base = i * 4;
+        const x = floats[base];
+        const y = floats[base + 1];
+        const z = floats[base + 2];
+        const prob = floats[base + 3];
+        voxelList[written] = { x, y, z, prob, cls: classifyVoxel(x, y, z, prob) };
+        written += 1;
       }
-      setVoxels(voxelList);
+      voxelsRef.current = voxelList;
 
+      const interval = receiveTime - sendTimeRef.current;
+      sendTimeRef.current = receiveTime;
+      latencySumRef.current += interval;
       frameCountRef.current += 1;
-      const now = performance.now();
-      if (now - lastTimeRef.current >= 1000) {
+      if (receiveTime - lastTimeRef.current >= 1000) {
         setFps(frameCountRef.current);
+        setLatencyMs(latencySumRef.current / Math.max(frameCountRef.current, 1));
         frameCountRef.current = 0;
-        lastTimeRef.current = now;
+        latencySumRef.current = 0;
+        lastTimeRef.current = receiveTime;
       }
     };
 
-    return () => ws.close();
+    ws.onmessage = (event: MessageEvent) => {
+      if (!(event.data instanceof ArrayBuffer)) return;
+      pendingFrameRef.current = event.data;
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        const pending = pendingFrameRef.current;
+        pendingFrameRef.current = null;
+        if (pending) consumeFrame(pending);
+      });
+    };
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      ws.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -177,7 +198,7 @@ export const App: React.FC = () => {
           highlightCamera={highlightCamera}
         />
         <VoxelCanvas
-          voxels={voxels}
+          voxelsRef={voxelsRef}
           voxelSize={controls.voxelSize}
           layers={controls.layers}
           selected={selected}

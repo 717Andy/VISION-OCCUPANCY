@@ -1,18 +1,18 @@
-import React, { useRef, useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useRef, useMemo, type MutableRefObject } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import type { SemanticClass, SelectedVoxel, VoxelData } from './types';
 
 interface VoxelCanvasProps {
-  voxels: VoxelData[];
+  voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
   layers: Record<SemanticClass, boolean>;
   selected: SelectedVoxel | null;
   onSelect: (voxel: VoxelData | null) => void;
 }
 
-const MAX_INSTANCES = 16384;
+const MAX_INSTANCES = 900;
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
@@ -23,68 +23,90 @@ const CLASS_COLOR: Record<SemanticClass, string> = {
 };
 
 const VoxelInstances: React.FC<{
-  voxels: VoxelData[];
+  voxelsRef: MutableRefObject<VoxelData[]>;
   spacing: number;
+  layers: Record<SemanticClass, boolean>;
   selected: VoxelData | null;
   onSelect: (voxel: VoxelData | null) => void;
-}> = ({ voxels, spacing, selected, onSelect }) => {
+}> = ({ voxelsRef, spacing, layers, selected, onSelect }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const visibleRef = useRef<VoxelData[]>([]);
+  const layersRef = useRef(layers);
+  const spacingRef = useRef(spacing);
+  const selectedRef = useRef(selected);
+  const lastVoxelsRef = useRef<VoxelData[] | null>(null);
+  layersRef.current = layers;
+  spacingRef.current = spacing;
+  selectedRef.current = selected;
 
-  useEffect(() => {
-    if (!meshRef.current) return;
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    if (voxelsRef.current === lastVoxelsRef.current) return;
+    lastVoxelsRef.current = voxelsRef.current;
 
-    const count = Math.min(voxels.length, MAX_INSTANCES);
-    meshRef.current.count = count;
+    const layersNow = layersRef.current;
+    const spacingNow = spacingRef.current;
+    const selectedNow = selectedRef.current;
+    const visible = voxelsRef.current.filter((voxel) => layersNow[voxel.cls]);
+    visibleRef.current = visible;
+
+    const count = Math.min(visible.length, MAX_INSTANCES);
+    mesh.count = count;
 
     for (let i = 0; i < count; i++) {
-      const v = voxels[i];
-      dummy.position.set(v.x * spacing, v.z * spacing, v.y * spacing);
-      dummy.scale.setScalar(spacing * 0.9);
+      const voxel = visible[i];
+      dummy.position.set(voxel.x * spacingNow, voxel.z * spacingNow, voxel.y * spacingNow);
+      dummy.scale.setScalar(spacingNow * 0.9);
       dummy.updateMatrix();
-      meshRef.current.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(i, dummy.matrix);
 
-      color.set(CLASS_COLOR[v.cls]);
-      if (selected && selected.x === v.x && selected.y === v.y && selected.z === v.z) {
+      color.set(CLASS_COLOR[voxel.cls]);
+      if (
+        selectedNow &&
+        selectedNow.x === voxel.x &&
+        selectedNow.y === voxel.y &&
+        selectedNow.z === voxel.z
+      ) {
         color.offsetHSL(0, 0, 0.25);
       }
-      meshRef.current.setColorAt(i, color);
+      mesh.setColorAt(i, color);
     }
 
-    meshRef.current.instanceMatrix.needsUpdate = true;
-    if (meshRef.current.instanceColor) {
-      meshRef.current.instanceColor.needsUpdate = true;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) {
+      mesh.instanceColor.needsUpdate = true;
     }
-  }, [voxels, spacing, selected]);
+  });
 
   return (
     <instancedMesh
       ref={meshRef}
       args={[undefined, undefined, MAX_INSTANCES]}
-      castShadow
-      receiveShadow
+      frustumCulled={false}
       onClick={(event) => {
         event.stopPropagation();
         if (event.instanceId == null) return;
-        onSelect(voxels[event.instanceId] ?? null);
+        onSelect(visibleRef.current[event.instanceId] ?? null);
       }}
     >
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial roughness={0.35} metalness={0.15} />
+      <meshBasicMaterial toneMapped={false} />
     </instancedMesh>
   );
 };
 
 export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
-  voxels,
+  voxelsRef,
   voxelSize,
   layers,
   selected,
   onSelect,
 }) => {
   const spacing = voxelSize * 4;
-  const visible = useMemo(
-    () => voxels.filter((v) => layers[v.cls]),
-    [voxels, layers],
+  const layerKey = useMemo(
+    () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}`,
+    [layers],
   );
 
   return (
@@ -101,13 +123,13 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
           onPointerMissed={() => onSelect(null)}
         >
           <color attach="background" args={['#0d1117']} />
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[10, 20, 15]} intensity={1.2} castShadow />
-          <pointLight position={[-10, -10, -10]} intensity={0.4} />
+          <ambientLight intensity={0.8} />
 
           <VoxelInstances
-            voxels={visible}
+            key={layerKey}
+            voxelsRef={voxelsRef}
             spacing={spacing}
+            layers={layers}
             selected={selected?.voxel ?? null}
             onSelect={onSelect}
           />
