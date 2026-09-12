@@ -1,0 +1,15 @@
+{
+  "name": "VISION-OCCUPANCY",
+  "install": "bash ./.cursor/install.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "cd backend && . .venv/bin/activate && python main.py"
+    },
+    {
+      "name": "frontend",
+      "command": "cd frontend && npm run dev"
+    }
+  ],
+  "ports": [8000, 5173]
+}
