@@ -1,0 +1,13 @@
+nuScenes camera clip
+====================
+
+This folder contains a prepared 6-camera keyframe clip extracted from the
+official nuScenes mini split (scene-0103, Boston Seaport).
+
+Source: Caesar et al., "nuScenes: A multimodal dataset for autonomous driving",
+CVPR 2020. https://www.nuscenes.org/
+
+The original dataset is released by Motional for non-commercial research.
+Regenerate locally with:
+
+    python backend/prepare_nuscenes.py
