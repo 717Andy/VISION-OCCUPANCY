@@ -206,6 +206,15 @@ html, body, #root {
   background: rgba(13, 17, 23, 0.55);
   padding: 1px 6px;
   border-radius: 4px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.cam-tile .cam-ts {
+  font-size: 9px;
+  opacity: 0.85;
+  letter-spacing: 0.02em;
 }
 
 .cam-tile.active {
