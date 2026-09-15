@@ -20,6 +20,19 @@ interface CameraFeedProps {
   highlightCamera?: string | null;
 }
 
+function formatSceneTime(timeS: number): string {
+  const clamped = Math.max(0, timeS);
+  const m = Math.floor(clamped / 60);
+  const s = clamped - m * 60;
+  return `${String(m).padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+function formatCamOffset(sampleTs: number, camTs: number): string {
+  const dtMs = (camTs - sampleTs) / 1000;
+  const sign = dtMs >= 0 ? '+' : '';
+  return `${sign}${dtMs.toFixed(1)}ms`;
+}
+
 export const CameraFeed: React.FC<CameraFeedProps> = ({
   manifest,
   frameIndex,
@@ -28,6 +41,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   highlightCamera,
 }) => {
   const frame = manifest?.frames[frameIndex];
+  const frameCount = manifest?.frame_count ?? 0;
+  const timeS = frame?.time_s ?? 0;
 
   return (
     <section className="pane pane-camera">
@@ -41,27 +56,40 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         >
           <img src={settingsIcon} alt="" />
         </button>
-        <h1 className="pane-title">Camera Feed</h1>
+        <h1 className="pane-title">
+          Camera Feed
+          <span className="sub">
+            {manifest
+              ? `t=${formatSceneTime(timeS)} · frame ${frameIndex + 1}/${Math.max(frameCount, 1)}`
+              : 'waiting for clip'}
+          </span>
+        </h1>
       </div>
       <div className="camera-stage">
         <div className="camera-grid">
           {LAYOUT.map((cam) => {
             const path = frame?.cameras[cam.id];
+            const camTs = frame?.calibration?.[cam.id]?.timestamp;
             return (
               <article
-                key={cam.id}
+                key={`${cam.id}-${frameIndex}`}
                 className={`cam-tile ${cam.className} ${highlightCamera === cam.id ? 'active' : ''}`}
               >
                 {path ? (
                   <img
                     src={cameraFrameUrl(frameIndex, cam.id)}
-                    alt={cam.fallback}
+                    alt={`${cam.fallback} at ${formatSceneTime(timeS)}`}
                     draggable={false}
                   />
                 ) : (
                   <div className="cam-placeholder" />
                 )}
-                <span className="cam-label">{cam.fallback}</span>
+                <span className="cam-label">
+                  {cam.fallback}
+                  {camTs != null && frame?.timestamp != null && (
+                    <span className="cam-ts">{formatCamOffset(frame.timestamp, camTs)}</span>
+                  )}
+                </span>
               </article>
             );
           })}

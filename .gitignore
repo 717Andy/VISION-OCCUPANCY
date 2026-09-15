@@ -13,6 +13,9 @@ build/
 *.tar.gz
 /tmp/
 
+# Generated MiDaS depth caches
+backend/data/nuscenes/depth/
+
 # OS & Editor metadata
 .DS_Store
 .vscode/
