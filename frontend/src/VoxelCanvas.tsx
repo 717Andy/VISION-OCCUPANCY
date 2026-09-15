@@ -24,19 +24,19 @@ const CLASS_COLOR: Record<SemanticClass, string> = {
 
 const VoxelInstances: React.FC<{
   voxelsRef: MutableRefObject<VoxelData[]>;
-  spacing: number;
+  voxelSize: number;
   layers: Record<SemanticClass, boolean>;
   selected: VoxelData | null;
   onSelect: (voxel: VoxelData | null) => void;
-}> = ({ voxelsRef, spacing, layers, selected, onSelect }) => {
+}> = ({ voxelsRef, voxelSize, layers, selected, onSelect }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const visibleRef = useRef<VoxelData[]>([]);
   const layersRef = useRef(layers);
-  const spacingRef = useRef(spacing);
+  const sizeRef = useRef(voxelSize);
   const selectedRef = useRef(selected);
   const lastVoxelsRef = useRef<VoxelData[] | null>(null);
   layersRef.current = layers;
-  spacingRef.current = spacing;
+  sizeRef.current = voxelSize;
   selectedRef.current = selected;
 
   useFrame(() => {
@@ -46,7 +46,7 @@ const VoxelInstances: React.FC<{
     lastVoxelsRef.current = voxelsRef.current;
 
     const layersNow = layersRef.current;
-    const spacingNow = spacingRef.current;
+    const sizeNow = sizeRef.current;
     const selectedNow = selectedRef.current;
     const visible = voxelsRef.current.filter((voxel) => layersNow[voxel.cls]);
     visibleRef.current = visible;
@@ -56,8 +56,9 @@ const VoxelInstances: React.FC<{
 
     for (let i = 0; i < count; i++) {
       const voxel = visible[i];
-      dummy.position.set(voxel.x * spacingNow, voxel.z * spacingNow, voxel.y * spacingNow);
-      dummy.scale.setScalar(spacingNow * 0.9);
+      // nuScenes ego: x forward, y left, z up → Three.js: x right, y up, z forward
+      dummy.position.set(-voxel.y, voxel.z, voxel.x);
+      dummy.scale.setScalar(Math.max(sizeNow, 0.12) * 0.9);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
@@ -103,10 +104,9 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   selected,
   onSelect,
 }) => {
-  const spacing = voxelSize * 4;
   const layerKey = useMemo(
-    () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}`,
-    [layers],
+    () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}-${voxelSize}`,
+    [layers, voxelSize],
   );
 
   return (
@@ -119,7 +119,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
       </div>
       <div className="voxel-stage">
         <Canvas
-          camera={{ position: [18, 14, 18], fov: 50 }}
+          camera={{ position: [12, 10, -22], fov: 50 }}
           onPointerMissed={() => onSelect(null)}
         >
           <color attach="background" args={['#0d1117']} />
@@ -128,25 +128,31 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
           <VoxelInstances
             key={layerKey}
             voxelsRef={voxelsRef}
-            spacing={spacing}
+            voxelSize={voxelSize}
             layers={layers}
             selected={selected?.voxel ?? null}
             onSelect={onSelect}
           />
 
           <Grid
-            position={[0, -0.1, 0]}
-            args={[40, 40]}
+            position={[0, 0, 12]}
+            args={[50, 50]}
             cellSize={1}
-            cellThickness={1}
+            cellThickness={0.6}
             cellColor="#30363d"
             sectionSize={5}
-            sectionThickness={1.5}
+            sectionThickness={1.2}
             sectionColor="#58a6ff"
-            fadeDistance={50}
+            fadeDistance={80}
           />
 
-          <OrbitControls makeDefault enableDamping dampingFactor={0.05} />
+          <OrbitControls
+            makeDefault
+            enableDamping
+            dampingFactor={0.05}
+            target={[0, 0.4, 10]}
+            maxDistance={80}
+          />
         </Canvas>
       </div>
     </section>

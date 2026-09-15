@@ -13,10 +13,19 @@ export interface CameraMeta {
   label: string;
 }
 
+export interface CameraCalibration {
+  intrinsic: number[][];
+  translation: number[];
+  rotation: number[];
+  timestamp: number;
+}
+
 export interface SceneFrame {
   index: number;
   timestamp: number;
+  time_s?: number;
   cameras: Record<string, string>;
+  calibration?: Record<string, CameraCalibration>;
 }
 
 export interface SceneManifest {
@@ -28,6 +37,8 @@ export interface SceneManifest {
   frame_count: number;
   cameras: CameraMeta[];
   frames: SceneFrame[];
+  original_image_size?: [number, number];
+  prepared_image_size?: [number, number];
 }
 
 export interface ControlsState {

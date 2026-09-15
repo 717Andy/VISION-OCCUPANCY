@@ -3,8 +3,8 @@ import struct
 import time
 import unittest
 
-from main import PerceptionPipeline
 from nuscenes_loader import CAMERA_IDS
+from pipeline import PerceptionPipeline
 
 
 class OccupancyTensorTests(unittest.TestCase):

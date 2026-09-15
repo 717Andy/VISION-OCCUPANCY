@@ -24,7 +24,9 @@ export async function fetchGpuLabel(): Promise<string> {
     const res = await fetch(`${API_BASE}/telemetry`);
     if (!res.ok) return 'CPU';
     const data = await res.json();
-    return data.gpu ?? 'CPU';
+    const gpu = data.gpu ?? 'CPU';
+    const source = data.voxel_source ? ` · ${data.voxel_source}` : '';
+    return `${gpu}${source}`;
   } catch {
     return 'CPU';
   }

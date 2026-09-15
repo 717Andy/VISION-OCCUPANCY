@@ -15,25 +15,26 @@ import type {
 } from './types';
 
 function classifyVoxel(x: number, y: number, z: number, _prob: number): SemanticClass {
-  if (z < 3) return 'driveable';
-  if (z < 8 && Math.abs(x) < 8) return 'vehicle';
+  if (z < 0.45) return 'driveable';
+  if (z < 2.3) return 'vehicle';
   return 'pedestrian';
 }
 
 function depthSourceFor(voxel: VoxelData): { label: string; id: string } {
-  const ax = voxel.x;
-  const ay = voxel.y;
-  if (Math.abs(ay) >= Math.abs(ax)) {
-    if (ay >= 0) {
-      if (ax < -4) return { label: 'Front-Left Cam', id: 'CAM_FRONT_LEFT' };
-      if (ax > 4) return { label: 'Front-Right Cam', id: 'CAM_FRONT_RIGHT' };
-      return { label: 'Front Cam', id: 'CAM_FRONT' };
-    }
-    if (ax < -4) return { label: 'Back-Left Cam', id: 'CAM_BACK_LEFT' };
-    if (ax > 4) return { label: 'Back-Right Cam', id: 'CAM_BACK_RIGHT' };
+  // nuScenes ego: x forward, y left, z up
+  const forward = voxel.x;
+  const left = voxel.y;
+  if (forward >= 4) {
+    if (left > 4) return { label: 'Front-Left Cam', id: 'CAM_FRONT_LEFT' };
+    if (left < -4) return { label: 'Front-Right Cam', id: 'CAM_FRONT_RIGHT' };
+    return { label: 'Front Cam', id: 'CAM_FRONT' };
+  }
+  if (forward <= -2) {
+    if (left > 4) return { label: 'Back-Left Cam', id: 'CAM_BACK_LEFT' };
+    if (left < -4) return { label: 'Back-Right Cam', id: 'CAM_BACK_RIGHT' };
     return { label: 'Back Cam', id: 'CAM_BACK' };
   }
-  return ax < 0
+  return left >= 0
     ? { label: 'Front-Left Cam', id: 'CAM_FRONT_LEFT' }
     : { label: 'Front-Right Cam', id: 'CAM_FRONT_RIGHT' };
 }
@@ -57,14 +58,29 @@ export const App: React.FC = () => {
 
   const voxelsRef = useRef<VoxelData[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
-  const frameCountRef = useRef(0);
-  const lastTimeRef = useRef(performance.now());
-  const sendTimeRef = useRef(performance.now());
-  const latencySumRef = useRef(0);
   const pendingFrameRef = useRef<ArrayBuffer | null>(null);
   const rafRef = useRef<number>(0);
   const thresholdRef = useRef(controls.threshold);
+  const voxelSizeRef = useRef(controls.voxelSize);
+  const frameIndexRef = useRef(frameIndex);
   thresholdRef.current = controls.threshold;
+  voxelSizeRef.current = controls.voxelSize;
+  frameIndexRef.current = frameIndex;
+
+  const sendOccupancyConfig = useCallback((socket?: WebSocket | null) => {
+    const ws = socket ?? wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(
+      JSON.stringify({
+        type: 'config',
+        frame_index: frameIndexRef.current,
+        voxel_size: voxelSizeRef.current,
+        occupancy_threshold: thresholdRef.current,
+        threshold: thresholdRef.current,
+        paused: false,
+      }),
+    );
+  }, []);
 
   useEffect(() => {
     fetchManifest()
@@ -82,11 +98,10 @@ export const App: React.FC = () => {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ threshold: thresholdRef.current, paused: false }));
+      sendOccupancyConfig(ws);
     };
 
     const consumeFrame = (buffer: ArrayBuffer) => {
-      const receiveTime = performance.now();
       const count = new Uint32Array(buffer, 0, 1)[0];
       const floats = new Float32Array(buffer, 4, count * 4);
       const stride = Math.max(1, Math.ceil(count / 900));
@@ -103,21 +118,33 @@ export const App: React.FC = () => {
         written += 1;
       }
       voxelsRef.current = voxelList;
-
-      const interval = receiveTime - sendTimeRef.current;
-      sendTimeRef.current = receiveTime;
-      latencySumRef.current += interval;
-      frameCountRef.current += 1;
-      if (receiveTime - lastTimeRef.current >= 1000) {
-        setFps(frameCountRef.current);
-        setLatencyMs(latencySumRef.current / Math.max(frameCountRef.current, 1));
-        frameCountRef.current = 0;
-        latencySumRef.current = 0;
-        lastTimeRef.current = receiveTime;
-      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data) as {
+            type?: string;
+            elapsed_ms?: number;
+            depth_ms?: number;
+            project_ms?: number;
+            device?: string;
+            voxel_source?: string;
+          };
+          if (msg.type === 'occupancy_meta') {
+            const elapsed =
+              msg.elapsed_ms ?? (msg.depth_ms ?? 0) + (msg.project_ms ?? 0);
+            setLatencyMs(elapsed);
+            if (msg.device) {
+              const source = msg.voxel_source ? ` · ${msg.voxel_source}` : '';
+              setGpu(`${msg.device === 'cpu' ? 'CPU' : msg.device}${source}`);
+            }
+          }
+        } catch {
+          /* ignore malformed control frames */
+        }
+        return;
+      }
       if (!(event.data instanceof ArrayBuffer)) return;
       pendingFrameRef.current = event.data;
       if (rafRef.current) return;
@@ -133,13 +160,28 @@ export const App: React.FC = () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws.close();
     };
+  }, [sendOccupancyConfig]);
+
+  useEffect(() => {
+    let frames = 0;
+    let last = performance.now();
+    let id = 0;
+    const loop = (now: number) => {
+      frames += 1;
+      if (now - last >= 1000) {
+        setFps(frames);
+        frames = 0;
+        last = now;
+      }
+      id = requestAnimationFrame(loop);
+    };
+    id = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(id);
   }, []);
 
   useEffect(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ threshold: controls.threshold, paused: false }));
-    }
-  }, [controls.threshold]);
+    sendOccupancyConfig();
+  }, [frameIndex, controls.voxelSize, controls.threshold, sendOccupancyConfig]);
 
   useEffect(() => {
     if (!playing || !manifest) return;
@@ -153,34 +195,25 @@ export const App: React.FC = () => {
     return () => window.clearInterval(id);
   }, [playing, manifest]);
 
-  const handleSelectVoxel = useCallback(
-    (voxel: VoxelData | null) => {
-      if (!voxel) {
-        setSelected(null);
-        return;
-      }
-      const source = depthSourceFor(voxel);
-      const t = performance.now() / 1000;
-      setSelected({
-        voxel,
-        meters: {
-          x: voxel.x * controls.voxelSize,
-          y: voxel.y * controls.voxelSize,
-          z: voxel.z * controls.voxelSize,
-        },
-        depthSource: source.label,
-        flow: {
-          vx: Math.sin(t + voxel.x * 0.2) * 4.5,
-          vy: Math.cos(t + voxel.y * 0.2) * 1.2,
-        },
-      });
-    },
-    [controls.voxelSize],
-  );
+  const handleSelectVoxel = useCallback((voxel: VoxelData | null) => {
+    if (!voxel) {
+      setSelected(null);
+      return;
+    }
+    const source = depthSourceFor(voxel);
+    const t = performance.now() / 1000;
+    setSelected({
+      voxel,
+      meters: { x: voxel.x, y: voxel.y, z: voxel.z },
+      depthSource: source.label,
+      flow: {
+        vx: Math.sin(t + voxel.x * 0.2) * 4.5,
+        vy: Math.cos(t + voxel.y * 0.2) * 1.2,
+      },
+    });
+  }, []);
 
-  const highlightCamera = selected
-    ? depthSourceFor(selected.voxel).id
-    : null;
+  const highlightCamera = selected ? depthSourceFor(selected.voxel).id : null;
 
   return (
     <div className="app-shell">
