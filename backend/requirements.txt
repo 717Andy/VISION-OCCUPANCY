@@ -1,3 +1,11 @@
+# Install into the SAME interpreter that runs uvicorn (from this folder):
+#   conda deactivate          # if the prompt still shows (base)
+#   source .venv/bin/activate # or: python3 -m venv .venv && source .venv/bin/activate
+#   python -m pip install -r requirements.txt
+#   python -m uvicorn main:app --reload --port 8000
+#
+# `PIL` comes from the pillow package. `open3d` is used for voxel grids.
+
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1

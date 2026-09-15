@@ -15,7 +15,14 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+
+try:
+    from PIL import Image
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "No module named 'PIL'. Install backend deps with "
+        "`python -m pip install -r requirements.txt` (Pillow provides PIL)."
+    ) from exc
 
 logger = logging.getLogger(__name__)
 

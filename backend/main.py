@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import shutil
 import subprocess
 import threading
@@ -7,11 +8,21 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from deps import require_packages
 
-from nuscenes_loader import (
+_optional_missing = require_packages()
+if _optional_missing:
+    logging.getLogger("visionoccupancy").warning(
+        "Optional packages not installed (%s). Occupancy may use CPU fallbacks. "
+        "Install with: python -m pip install -r requirements.txt",
+        ", ".join(_optional_missing),
+    )
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+
+from nuscenes_loader import (  # noqa: E402
     CAMERA_IDS,
     ORIGINAL_IMAGE_SIZE,
     PREPARED_IMAGE_SIZE,
@@ -19,7 +30,7 @@ from nuscenes_loader import (
     load_manifest,
     resolve_frame_path,
 )
-from pipeline import PerceptionPipeline
+from pipeline import PerceptionPipeline  # noqa: E402
 
 pipeline = PerceptionPipeline()
 

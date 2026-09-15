@@ -18,4 +18,5 @@ backend/data/nuscenes/depth/
 
 # OS & Editor metadata
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/settings.json

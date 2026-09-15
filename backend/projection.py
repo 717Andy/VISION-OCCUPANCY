@@ -13,6 +13,11 @@ from typing import Any
 
 import numpy as np
 
+try:
+    import open3d as o3d
+except ImportError:  # Open3D is optional; NumPy voxelization still works.
+    o3d = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 NEAR_M = 0.5
@@ -200,14 +205,13 @@ def voxelize_occupancy(
     if centers.shape[0] == 0:
         return centers, occ
 
-    try:
-        import open3d as o3d
-
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(centers.astype(np.float64))
-        o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=size)
-    except Exception as exc:  # pragma: no cover - Open3D optional at import time
-        logger.warning("Open3D voxelization unavailable (%s); using NumPy grid", exc)
+    if o3d is not None:
+        try:
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(centers.astype(np.float64))
+            o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=size)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Open3D voxelization unavailable (%s); using NumPy grid", exc)
     return centers, occ
 
 

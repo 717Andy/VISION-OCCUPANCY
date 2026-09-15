@@ -9,7 +9,15 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image
+
+try:
+    from PIL import Image
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "No module named 'PIL'. Pillow is not installed in this interpreter. "
+        "If conda `(base)` is active, run `conda deactivate`, then from backend/: "
+        "`python -m pip install -r requirements.txt`"
+    ) from exc
 
 DATA_ROOT = Path(__file__).resolve().parent / "data" / "nuscenes"
 MANIFEST_PATH = DATA_ROOT / "manifest.json"
