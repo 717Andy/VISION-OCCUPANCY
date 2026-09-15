@@ -5,6 +5,9 @@
 #   python -m uvicorn main:app --reload --port 8000
 #
 # `PIL` comes from the pillow package. `open3d` is used for voxel grids.
+# Pin NumPy 1.26: Mac pip often resolves torch==2.2.2 / Open3D 0.19, which are
+# NumPy 1.x wheels. NumPy 2.5 + those wheels raises "Numpy is not available".
+# Use Python 3.12 (NumPy 1.26 has no 3.13 wheels).
 
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -13,7 +16,7 @@ click==8.5.0
 fastapi==0.141.1
 h11==0.16.0
 idna==3.19
-numpy==2.5.3
+numpy==1.26.4
 pillow==11.3.0
 pydantic==2.13.5
 pydantic_core==2.46.5
@@ -24,5 +27,5 @@ uvicorn==0.52.4
 websockets==17.1
 torch>=2.2.0
 timm>=0.9.16
-opencv-python-headless>=4.8.0
+opencv-python-headless>=4.8.0,<5
 open3d>=0.18.0
