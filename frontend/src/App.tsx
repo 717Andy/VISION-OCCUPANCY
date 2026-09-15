@@ -58,9 +58,6 @@ export const App: React.FC = () => {
 
   const voxelsRef = useRef<VoxelData[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
-  const frameCountRef = useRef(0);
-  const lastTimeRef = useRef(performance.now());
-  const latencySumRef = useRef(0);
   const pendingFrameRef = useRef<ArrayBuffer | null>(null);
   const rafRef = useRef<number>(0);
   const thresholdRef = useRef(controls.threshold);
@@ -105,7 +102,6 @@ export const App: React.FC = () => {
     };
 
     const consumeFrame = (buffer: ArrayBuffer) => {
-      const receiveTime = performance.now();
       const count = new Uint32Array(buffer, 0, 1)[0];
       const floats = new Float32Array(buffer, 4, count * 4);
       const stride = Math.max(1, Math.ceil(count / 900));
@@ -122,17 +118,6 @@ export const App: React.FC = () => {
         written += 1;
       }
       voxelsRef.current = voxelList;
-
-      frameCountRef.current += 1;
-      if (receiveTime - lastTimeRef.current >= 1000) {
-        setFps(frameCountRef.current);
-        if (latencySumRef.current > 0) {
-          setLatencyMs(latencySumRef.current / Math.max(frameCountRef.current, 1));
-        }
-        frameCountRef.current = 0;
-        latencySumRef.current = 0;
-        lastTimeRef.current = receiveTime;
-      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -149,7 +134,6 @@ export const App: React.FC = () => {
           if (msg.type === 'occupancy_meta') {
             const elapsed =
               msg.elapsed_ms ?? (msg.depth_ms ?? 0) + (msg.project_ms ?? 0);
-            latencySumRef.current += elapsed;
             setLatencyMs(elapsed);
             if (msg.device) {
               const source = msg.voxel_source ? ` · ${msg.voxel_source}` : '';
@@ -177,6 +161,23 @@ export const App: React.FC = () => {
       ws.close();
     };
   }, [sendOccupancyConfig]);
+
+  useEffect(() => {
+    let frames = 0;
+    let last = performance.now();
+    let id = 0;
+    const loop = (now: number) => {
+      frames += 1;
+      if (now - last >= 1000) {
+        setFps(frames);
+        frames = 0;
+        last = now;
+      }
+      id = requestAnimationFrame(loop);
+    };
+    id = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   useEffect(() => {
     sendOccupancyConfig();
