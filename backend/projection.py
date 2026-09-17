@@ -165,6 +165,7 @@ def _voxelize_numpy(
     occupancy_threshold: float,
     bounds: np.ndarray,
     origin: np.ndarray | None = None,
+    cap: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     pts = clip_to_bounds(points, bounds)
     if pts.shape[0] == 0:
@@ -179,7 +180,9 @@ def _voxelize_numpy(
     kept = uniq[keep]
     occ = occupancy[keep]
     centers = (origin + (kept.astype(np.float64) + 0.5) * voxel_size).astype(np.float32)
-    return _cap_voxels(centers, occ)
+    if cap:
+        return _cap_voxels(centers, occ)
+    return centers, occ
 
 
 def voxelize_occupancy(
@@ -297,6 +300,41 @@ def _touch_open3d(centers: np.ndarray, voxel_size: float) -> None:
         logger.warning("Open3D voxelization unavailable (%s); using NumPy grid", exc)
 
 
+def _voxel_keys(centers: np.ndarray, voxel_size: float, origin: np.ndarray) -> np.ndarray:
+    pts = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
+    if pts.size == 0:
+        return np.zeros((0, 3), dtype=np.int64)
+    return np.floor((pts - origin) / voxel_size).astype(np.int64)
+
+
+def _gt_display_voxels(
+    pred_centers: np.ndarray,
+    pred_occ: np.ndarray,
+    gt_centers: np.ndarray,
+    gt_occ: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Show prediction cells plus extra lower-threshold GT cells (denser pane)."""
+    if gt_centers.shape[0] == 0:
+        return pred_centers, pred_occ
+    pred_keyset = {tuple(row) for row in _voxel_keys(pred_centers, voxel_size, origin).tolist()}
+    extra_mask = np.array(
+        [tuple(row) not in pred_keyset for row in _voxel_keys(gt_centers, voxel_size, origin).tolist()],
+        dtype=bool,
+    )
+    extra_c = gt_centers[extra_mask]
+    extra_o = gt_occ[extra_mask]
+    if extra_c.shape[0] > MAX_VOXELS:
+        extra_c, extra_o = _cap_voxels(extra_c, extra_o)
+    if extra_c.shape[0] == 0:
+        return pred_centers, pred_occ
+    return (
+        np.concatenate([pred_centers, extra_c], axis=0),
+        np.concatenate([pred_occ, extra_o], axis=0),
+    )
+
+
 def voxelize_aligned(
     points: np.ndarray,
     voxel_size: float,
@@ -306,7 +344,7 @@ def voxelize_aligned(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Histogram occupancy on a shared origin so pred/GT indices line up."""
     size = float(max(voxel_size, 0.05))
-    return _voxelize_numpy(points, size, occupancy_threshold, bounds, origin=origin)
+    return _voxelize_numpy(points, size, occupancy_threshold, bounds, origin=origin, cap=False)
 
 
 def project_cameras_to_voxels(
@@ -344,6 +382,10 @@ def project_cameras_to_voxel_pair(
     gt_centers, gt_occ = voxelize_aligned(
         pts, size, gt_occupancy_threshold(occupancy_threshold), origin
     )
-    _touch_open3d(pred_centers, size)
     miou = grid_miou(pred_centers, gt_centers, size, origin)
+    pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
+    gt_centers, gt_occ = _gt_display_voxels(
+        pred_centers, pred_occ, gt_centers, gt_occ, size, origin
+    )
+    _touch_open3d(pred_centers, size)
     return pred_centers, pred_occ, gt_centers, gt_occ, miou
