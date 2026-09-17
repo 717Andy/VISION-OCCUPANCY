@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { VoxelCanvas } from './VoxelCanvas';
+import { VoxelCanvas, createSharedOrbit } from './VoxelCanvas';
 import { ControlPanel } from './ControlPanel';
 import { CameraFeed } from './CameraFeed';
 import { PlaybackBar } from './PlaybackBar';
@@ -11,6 +11,7 @@ import type {
   SceneManifest,
   SelectedVoxel,
   SemanticClass,
+  ViewMode,
   VoxelData,
 } from './types';
 
@@ -55,8 +56,12 @@ export const App: React.FC = () => {
   const [manifest, setManifest] = useState<SceneManifest | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [miou, setMiou] = useState('—');
 
-  const voxelsRef = useRef<VoxelData[]>([]);
+  const predVoxelsRef = useRef<VoxelData[]>([]);
+  const gtVoxelsRef = useRef<VoxelData[]>([]);
+  const orbitRef = useRef(createSharedOrbit());
   const wsRef = useRef<WebSocket | null>(null);
   const pendingFrameRef = useRef<ArrayBuffer | null>(null);
   const rafRef = useRef<number>(0);
@@ -101,9 +106,7 @@ export const App: React.FC = () => {
       sendOccupancyConfig(ws);
     };
 
-    const consumeFrame = (buffer: ArrayBuffer) => {
-      const count = new Uint32Array(buffer, 0, 1)[0];
-      const floats = new Float32Array(buffer, 4, count * 4);
+    const decodeVoxels = (floats: Float32Array, count: number): VoxelData[] => {
       const stride = Math.max(1, Math.ceil(count / 900));
       const kept = Math.ceil(count / stride);
       const voxelList: VoxelData[] = new Array(kept);
@@ -117,7 +120,21 @@ export const App: React.FC = () => {
         voxelList[written] = { x, y, z, prob, cls: classifyVoxel(x, y, z, prob) };
         written += 1;
       }
-      voxelsRef.current = voxelList;
+      return voxelList;
+    };
+
+    const consumeFrame = (buffer: ArrayBuffer) => {
+      if (buffer.byteLength < 8) return;
+      const header = new Uint32Array(buffer, 0, 2);
+      const predCount = header[0];
+      const gtCount = header[1];
+      const predBytes = predCount * 16;
+      const gtBytes = gtCount * 16;
+      if (buffer.byteLength < 8 + predBytes + gtBytes) return;
+      const predFloats = new Float32Array(buffer, 8, predCount * 4);
+      const gtFloats = new Float32Array(buffer, 8 + predBytes, gtCount * 4);
+      predVoxelsRef.current = decodeVoxels(predFloats, predCount);
+      gtVoxelsRef.current = decodeVoxels(gtFloats, gtCount);
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -130,6 +147,7 @@ export const App: React.FC = () => {
             project_ms?: number;
             device?: string;
             voxel_source?: string;
+            miou?: number;
           };
           if (msg.type === 'occupancy_meta') {
             const elapsed =
@@ -138,6 +156,9 @@ export const App: React.FC = () => {
             if (msg.device) {
               const source = msg.voxel_source ? ` · ${msg.voxel_source}` : '';
               setGpu(`${msg.device === 'cpu' ? 'CPU' : msg.device}${source}`);
+            }
+            if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
+              setMiou(msg.miou.toFixed(2));
             }
           }
         } catch {
@@ -215,11 +236,24 @@ export const App: React.FC = () => {
 
   const highlightCamera = selected ? depthSourceFor(selected.voxel).id : null;
 
+  useEffect(() => {
+    if (viewMode === 'split') {
+      orbitRef.current.driver = 'pred';
+    }
+  }, [viewMode]);
+
   return (
     <div className="app-shell">
-      <TopBar fps={fps} latencyMs={latencyMs} miou="—" gpu={gpu} />
+      <TopBar
+        fps={fps}
+        latencyMs={latencyMs}
+        miou={miou}
+        gpu={gpu}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
 
-      <div className="workspace">
+      <div className={`workspace${viewMode === 'split' ? ' split' : ''}`}>
         <CameraFeed
           manifest={manifest}
           frameIndex={frameIndex}
@@ -230,12 +264,31 @@ export const App: React.FC = () => {
           }}
           highlightCamera={highlightCamera}
         />
+        {viewMode === 'split' && (
+          <VoxelCanvas
+            className="pane pane-voxel pane-gt"
+            title="Ground Truth"
+            subtitle="Sensor Occupancy Grid"
+            voxelsRef={gtVoxelsRef}
+            voxelSize={controls.voxelSize}
+            layers={controls.layers}
+            selected={selected}
+            onSelect={handleSelectVoxel}
+            orbitRef={orbitRef}
+            orbitId="gt"
+          />
+        )}
         <VoxelCanvas
-          voxelsRef={voxelsRef}
+          className="pane pane-voxel pane-pred"
+          title="Vision Prediction"
+          subtitle="3D Voxel Grid Scene"
+          voxelsRef={predVoxelsRef}
           voxelSize={controls.voxelSize}
           layers={controls.layers}
           selected={selected}
           onSelect={handleSelectVoxel}
+          orbitRef={orbitRef}
+          orbitId="pred"
         />
         {settingsOpen && (
           <ControlPanel
