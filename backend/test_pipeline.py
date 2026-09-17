@@ -37,6 +37,16 @@ class OccupancyTensorTests(unittest.TestCase):
             self.assertTrue(math.isfinite(prob))
 
 
+    def test_occupancy_pair_has_denser_ground_truth(self):
+        pipeline = PerceptionPipeline()
+        payload = pipeline.generate_occupancy_pair(threshold=0.5)
+        pred_n, gt_n = struct.unpack_from("<II", payload, 0)
+        self.assertGreater(pred_n, 0)
+        self.assertGreaterEqual(gt_n, pred_n)
+        self.assertEqual(len(payload), 8 + (pred_n + gt_n) * 16)
+        self.assertGreater(pipeline.last_miou, 0.0)
+        self.assertLessEqual(pipeline.last_miou, 1.0)
+
     def test_vectorized_generation_is_realtime(self):
         pipeline = PerceptionPipeline()
         pipeline.generate_occupancy_tensor(threshold=0.38)  # warmup

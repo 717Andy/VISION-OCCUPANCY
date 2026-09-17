@@ -4,12 +4,31 @@ import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import type { SemanticClass, SelectedVoxel, VoxelData } from './types';
 
+export type SharedOrbit = {
+  position: THREE.Vector3;
+  target: THREE.Vector3;
+  driver: string | null;
+};
+
+export function createSharedOrbit(): SharedOrbit {
+  return {
+    position: new THREE.Vector3(12, 10, -22),
+    target: new THREE.Vector3(0, 0.4, 10),
+    driver: null,
+  };
+}
+
 interface VoxelCanvasProps {
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
   layers: Record<SemanticClass, boolean>;
   selected: SelectedVoxel | null;
   onSelect: (voxel: VoxelData | null) => void;
+  title?: string;
+  subtitle?: string;
+  className?: string;
+  orbitRef?: MutableRefObject<SharedOrbit>;
+  orbitId?: string;
 }
 
 const MAX_INSTANCES = 900;
@@ -97,12 +116,57 @@ const VoxelInstances: React.FC<{
   );
 };
 
+const SyncedOrbitControls: React.FC<{
+  orbitRef?: MutableRefObject<SharedOrbit>;
+  orbitId?: string;
+}> = ({ orbitRef, orbitId }) => {
+  const controlsRef = useRef<{
+    object: THREE.Camera;
+    target: THREE.Vector3;
+    update: () => void;
+  } | null>(null);
+
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls || !orbitRef || !orbitId) return;
+    const shared = orbitRef.current;
+    if (shared.driver === orbitId) {
+      shared.position.copy(controls.object.position);
+      shared.target.copy(controls.target);
+      return;
+    }
+    if (shared.driver == null) return;
+    controls.object.position.copy(shared.position);
+    controls.target.copy(shared.target);
+    controls.update();
+  });
+
+  return (
+    <OrbitControls
+      ref={controlsRef as never}
+      makeDefault
+      enableDamping
+      dampingFactor={0.05}
+      target={[0, 0.4, 10]}
+      maxDistance={80}
+      onStart={() => {
+        if (orbitRef && orbitId) orbitRef.current.driver = orbitId;
+      }}
+    />
+  );
+};
+
 export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   voxelsRef,
   voxelSize,
   layers,
   selected,
   onSelect,
+  title = 'Vision Prediction',
+  subtitle = '3D Voxel Grid Scene',
+  className = 'pane',
+  orbitRef,
+  orbitId,
 }) => {
   const layerKey = useMemo(
     () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}-${voxelSize}`,
@@ -110,11 +174,11 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   );
 
   return (
-    <section className="pane">
+    <section className={className}>
       <div className="pane-header">
         <h1 className="pane-title">
-          Vision Prediction
-          <span className="sub">3D Voxel Grid Scene</span>
+          {title}
+          <span className="sub">{subtitle}</span>
         </h1>
       </div>
       <div className="voxel-stage">
@@ -146,13 +210,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             fadeDistance={80}
           />
 
-          <OrbitControls
-            makeDefault
-            enableDamping
-            dampingFactor={0.05}
-            target={[0, 0.4, 10]}
-            maxDistance={80}
-          />
+          <SyncedOrbitControls orbitRef={orbitRef} orbitId={orbitId} />
         </Canvas>
       </div>
     </section>

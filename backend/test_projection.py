@@ -11,7 +11,10 @@ from projection import (
     NEAR_M,
     camera_to_ego,
     disparity_to_metric_depth,
+    grid_miou,
+    gt_occupancy_threshold,
     pack_occupancy,
+    pack_occupancy_pair,
     quat_to_rotmat,
     scale_intrinsics,
     unproject_depth,
@@ -111,6 +114,42 @@ class VoxelizationTests(unittest.TestCase):
         body = np.frombuffer(payload[4:], dtype=np.float32).reshape(count, 4)
         self.assertEqual(int(count), 1)
         np.testing.assert_allclose(body[0], [1.0, 2.0, 0.5, 0.9])
+
+    def test_pair_protocol_roundtrip(self):
+        pred_c = np.array([[1.0, 2.0, 0.5]], dtype=np.float32)
+        pred_o = np.array([0.9], dtype=np.float32)
+        gt_c = np.array([[1.0, 2.0, 0.5], [3.0, 0.0, 1.0]], dtype=np.float32)
+        gt_o = np.array([0.9, 0.4], dtype=np.float32)
+        payload = pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o)
+        pred_n, gt_n = np.frombuffer(payload[:8], dtype=np.uint32)
+        self.assertEqual(int(pred_n), 1)
+        self.assertEqual(int(gt_n), 2)
+        body = np.frombuffer(payload[8:], dtype=np.float32)
+        self.assertEqual(body.size, (1 + 2) * 4)
+        np.testing.assert_allclose(body[:4], [1.0, 2.0, 0.5, 0.9])
+        np.testing.assert_allclose(body[4:8], [1.0, 2.0, 0.5, 0.9])
+        np.testing.assert_allclose(body[8:], [3.0, 0.0, 1.0, 0.4])
+
+    def test_lower_threshold_keeps_more_ground_truth_voxels(self):
+        rng = np.random.default_rng(0)
+        clustered = rng.normal(loc=[2.0, 1.0, 0.5], scale=0.04, size=(40, 3))
+        sparse = rng.normal(loc=[8.0, -4.0, 1.5], scale=0.12, size=(6, 3))
+        points = np.vstack([clustered, sparse])
+        pred_c, _ = voxelize_occupancy(points, voxel_size=0.2, occupancy_threshold=0.38)
+        gt_c, _ = voxelize_occupancy(
+            points,
+            voxel_size=0.2,
+            occupancy_threshold=gt_occupancy_threshold(0.38),
+        )
+        self.assertGreaterEqual(gt_c.shape[0], pred_c.shape[0])
+
+    def test_grid_miou_identical_and_disjoint(self):
+        cells = np.array([[0.1, 0.1, 0.1], [1.1, 0.1, 0.1]], dtype=np.float32)
+        self.assertAlmostEqual(grid_miou(cells, cells, voxel_size=1.0), 1.0)
+        other = np.array([[10.1, 10.1, 0.1]], dtype=np.float32)
+        self.assertAlmostEqual(grid_miou(cells, other, voxel_size=1.0), 0.0)
+        empty = np.zeros((0, 3), dtype=np.float32)
+        self.assertAlmostEqual(grid_miou(empty, empty, voxel_size=1.0), 1.0)
 
 
 if __name__ == "__main__":

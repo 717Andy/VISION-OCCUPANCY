@@ -1,5 +1,7 @@
 export type SemanticClass = 'driveable' | 'vehicle' | 'pedestrian';
 
+export type ViewMode = 'single' | 'split';
+
 export interface VoxelData {
   x: number;
   y: number;

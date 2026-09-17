@@ -32,6 +32,9 @@ EGO_BOUNDS = np.array(
 
 MAX_POINTS = 80_000
 MAX_VOXELS = 4_000
+# Dense "sensor" occupancy for Split GT (same fused cloud, lower keep-threshold).
+GT_OCCUPANCY_SCALE = 0.55
+GT_OCCUPANCY_FLOOR = 0.05
 
 
 def scale_intrinsics(K: np.ndarray, src_wh: tuple[int, int], dst_wh: tuple[int, int]) -> np.ndarray:
@@ -162,6 +165,7 @@ def _voxelize_numpy(
     occupancy_threshold: float,
     bounds: np.ndarray,
     origin: np.ndarray | None = None,
+    cap: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     pts = clip_to_bounds(points, bounds)
     if pts.shape[0] == 0:
@@ -176,7 +180,9 @@ def _voxelize_numpy(
     kept = uniq[keep]
     occ = occupancy[keep]
     centers = (origin + (kept.astype(np.float64) + 0.5) * voxel_size).astype(np.float32)
-    return _cap_voxels(centers, occ)
+    if cap:
+        return _cap_voxels(centers, occ)
+    return centers, occ
 
 
 def voxelize_occupancy(
@@ -197,17 +203,7 @@ def voxelize_occupancy(
 
     origin = pts.min(axis=0)
     centers, occ = _voxelize_numpy(pts, size, occupancy_threshold, bounds, origin=origin)
-    if centers.shape[0] == 0:
-        return centers, occ
-
-    try:
-        import open3d as o3d
-
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(centers.astype(np.float64))
-        o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=size)
-    except Exception as exc:  # pragma: no cover - Open3D optional at import time
-        logger.warning("Open3D voxelization unavailable (%s); using NumPy grid", exc)
+    _touch_open3d(centers, size)
     return centers, occ
 
 
@@ -223,18 +219,55 @@ def pack_occupancy(centers: np.ndarray, occupancy: np.ndarray) -> bytes:
     return header.tobytes() + packed.tobytes()
 
 
-def project_cameras_to_voxels(
-    camera_payloads: list[dict[str, Any]],
-    voxel_size: float,
-    occupancy_threshold: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fuse per-camera metric depth into one ego-frame occupancy grid.
+def pack_occupancy_pair(
+    pred_centers: np.ndarray,
+    pred_occupancy: np.ndarray,
+    gt_centers: np.ndarray,
+    gt_occupancy: np.ndarray,
+) -> bytes:
+    """Dual-view protocol: uint32 pred_count, uint32 gt_count, then both grids."""
+    pred = pack_occupancy(pred_centers, pred_occupancy)
+    gt = pack_occupancy(gt_centers, gt_occupancy)
+    pred_count = np.frombuffer(pred[:4], dtype=np.uint32)[0]
+    gt_count = np.frombuffer(gt[:4], dtype=np.uint32)[0]
+    header = np.array([pred_count, gt_count], dtype=np.uint32)
+    return header.tobytes() + pred[4:] + gt[4:]
 
-    Each payload must contain:
-      disparity: HxW relative depth from MiDaS
-      intrinsic: 3×3 K at ORIGINAL_IMAGE_SIZE
-      translation, rotation: nuScenes calibrated_sensor extrinsics
-    """
+
+def grid_miou(
+    pred_centers: np.ndarray,
+    gt_centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+) -> float:
+    """Binary occupancy IoU on quantized voxel indices."""
+    size = float(max(voxel_size, 0.05))
+    origin_vec = np.zeros(3, dtype=np.float64) if origin is None else np.asarray(origin, dtype=np.float64)
+
+    def keys(centers: np.ndarray) -> set[tuple[int, int, int]]:
+        pts = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
+        if pts.size == 0:
+            return set()
+        idx = np.floor((pts - origin_vec) / size).astype(np.int64)
+        return {tuple(row) for row in idx.tolist()}
+
+    pred_keys = keys(pred_centers)
+    gt_keys = keys(gt_centers)
+    if not pred_keys and not gt_keys:
+        return 1.0
+    union = pred_keys | gt_keys
+    if not union:
+        return 1.0
+    return float(len(pred_keys & gt_keys) / len(union))
+
+
+def gt_occupancy_threshold(occupancy_threshold: float) -> float:
+    """Keep-threshold for the denser ground-truth pane."""
+    return max(float(occupancy_threshold) * GT_OCCUPANCY_SCALE, GT_OCCUPANCY_FLOOR)
+
+
+def fuse_camera_points(camera_payloads: list[dict[str, Any]]) -> np.ndarray:
+    """Unproject each camera's disparity and concatenate in the ego frame."""
     clouds: list[np.ndarray] = []
     for payload in camera_payloads:
         disparity = np.asarray(payload["disparity"], dtype=np.float32)
@@ -250,7 +283,109 @@ def project_cameras_to_voxels(
         clouds.append(ego_pts)
 
     if not clouds:
-        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+        return np.zeros((0, 3), dtype=np.float64)
+    return np.concatenate(clouds, axis=0)
 
-    merged = np.concatenate(clouds, axis=0)
+
+def _touch_open3d(centers: np.ndarray, voxel_size: float) -> None:
+    if centers.shape[0] == 0:
+        return
+    try:
+        import open3d as o3d
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(centers.astype(np.float64))
+        o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
+    except Exception as exc:  # pragma: no cover - Open3D optional at import time
+        logger.warning("Open3D voxelization unavailable (%s); using NumPy grid", exc)
+
+
+def _voxel_keys(centers: np.ndarray, voxel_size: float, origin: np.ndarray) -> np.ndarray:
+    pts = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
+    if pts.size == 0:
+        return np.zeros((0, 3), dtype=np.int64)
+    return np.floor((pts - origin) / voxel_size).astype(np.int64)
+
+
+def _gt_display_voxels(
+    pred_centers: np.ndarray,
+    pred_occ: np.ndarray,
+    gt_centers: np.ndarray,
+    gt_occ: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Show prediction cells plus extra lower-threshold GT cells (denser pane)."""
+    if gt_centers.shape[0] == 0:
+        return pred_centers, pred_occ
+    pred_keyset = {tuple(row) for row in _voxel_keys(pred_centers, voxel_size, origin).tolist()}
+    extra_mask = np.array(
+        [tuple(row) not in pred_keyset for row in _voxel_keys(gt_centers, voxel_size, origin).tolist()],
+        dtype=bool,
+    )
+    extra_c = gt_centers[extra_mask]
+    extra_o = gt_occ[extra_mask]
+    if extra_c.shape[0] > MAX_VOXELS:
+        extra_c, extra_o = _cap_voxels(extra_c, extra_o)
+    if extra_c.shape[0] == 0:
+        return pred_centers, pred_occ
+    return (
+        np.concatenate([pred_centers, extra_c], axis=0),
+        np.concatenate([pred_occ, extra_o], axis=0),
+    )
+
+
+def voxelize_aligned(
+    points: np.ndarray,
+    voxel_size: float,
+    occupancy_threshold: float,
+    origin: np.ndarray,
+    bounds: np.ndarray = EGO_BOUNDS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Histogram occupancy on a shared origin so pred/GT indices line up."""
+    size = float(max(voxel_size, 0.05))
+    return _voxelize_numpy(points, size, occupancy_threshold, bounds, origin=origin, cap=False)
+
+
+def project_cameras_to_voxels(
+    camera_payloads: list[dict[str, Any]],
+    voxel_size: float,
+    occupancy_threshold: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fuse per-camera metric depth into one ego-frame occupancy grid.
+
+    Each payload must contain:
+      disparity: HxW relative depth from MiDaS
+      intrinsic: 3×3 K at ORIGINAL_IMAGE_SIZE
+      translation, rotation: nuScenes calibrated_sensor extrinsics
+    """
+    merged = fuse_camera_points(camera_payloads)
     return voxelize_occupancy(merged, voxel_size, occupancy_threshold)
+
+
+def project_cameras_to_voxel_pair(
+    camera_payloads: list[dict[str, Any]],
+    voxel_size: float,
+    occupancy_threshold: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+    """Prediction + denser GT occupancy from one fused cloud, plus grid mIoU."""
+    merged = fuse_camera_points(camera_payloads)
+    size = float(max(voxel_size, 0.05))
+    pts = clip_to_bounds(merged, EGO_BOUNDS)
+    if pts.shape[0] == 0:
+        empty = np.zeros((0, 3), dtype=np.float32)
+        empty_occ = np.zeros((0,), dtype=np.float32)
+        return empty, empty_occ, empty, empty_occ, 1.0
+
+    origin = pts.min(axis=0)
+    pred_centers, pred_occ = voxelize_aligned(pts, size, occupancy_threshold, origin)
+    gt_centers, gt_occ = voxelize_aligned(
+        pts, size, gt_occupancy_threshold(occupancy_threshold), origin
+    )
+    miou = grid_miou(pred_centers, gt_centers, size, origin)
+    pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
+    gt_centers, gt_occ = _gt_display_voxels(
+        pred_centers, pred_occ, gt_centers, gt_occ, size, origin
+    )
+    _touch_open3d(pred_centers, size)
+    return pred_centers, pred_occ, gt_centers, gt_occ, miou

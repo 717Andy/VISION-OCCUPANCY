@@ -87,6 +87,22 @@ html, body, #root {
   opacity: 0.85;
 }
 
+.workspace.split {
+  grid-template-columns: minmax(260px, 0.32fr) 1fr 1fr;
+}
+
+.pane-voxel {
+  min-width: 0;
+}
+
+.pane-gt {
+  border-right: 2px solid var(--border);
+}
+
+.pane-pred {
+  min-width: 0;
+}
+
 .hud {
   flex: 1 1 auto;
   text-align: center;
