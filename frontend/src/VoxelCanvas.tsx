@@ -73,6 +73,12 @@ const VoxelInstances: React.FC<{
 
     const count = Math.min(visible.length, MAX_INSTANCES);
     mesh.count = count;
+    if (!mesh.instanceColor) {
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(MAX_INSTANCES * 3),
+        3,
+      );
+    }
 
     for (let i = 0; i < count; i++) {
       const voxel = visible[i];
@@ -103,9 +109,7 @@ const VoxelInstances: React.FC<{
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) {
-      mesh.instanceColor.needsUpdate = true;
-    }
+    mesh.instanceColor.needsUpdate = true;
   });
 
   return (
@@ -120,7 +124,7 @@ const VoxelInstances: React.FC<{
       }}
     >
       <boxGeometry args={[1, 1, 1]} />
-      <meshBasicMaterial toneMapped={false} />
+      <meshBasicMaterial toneMapped={false} vertexColors />
     </instancedMesh>
   );
 };
