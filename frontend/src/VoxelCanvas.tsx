@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, type MutableRefObject } from 'react';
+import React, { useRef, useMemo, useLayoutEffect, type MutableRefObject } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
@@ -59,6 +59,17 @@ const VoxelInstances: React.FC<{
   sizeRef.current = voxelSize;
   selectedRef.current = selected;
 
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const attr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_INSTANCES * 3), 3);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < MAX_INSTANCES; i++) attr.setXYZ(i, 1, 1, 1);
+    mesh.instanceColor = attr;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+    material.needsUpdate = true;
+  }, []);
+
   useFrame(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
@@ -73,12 +84,6 @@ const VoxelInstances: React.FC<{
 
     const count = Math.min(visible.length, MAX_INSTANCES);
     mesh.count = count;
-    if (!mesh.instanceColor) {
-      mesh.instanceColor = new THREE.InstancedBufferAttribute(
-        new Float32Array(MAX_INSTANCES * 3),
-        3,
-      );
-    }
 
     for (let i = 0; i < count; i++) {
       const voxel = visible[i];
@@ -109,7 +114,7 @@ const VoxelInstances: React.FC<{
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.instanceColor.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
 
   return (
@@ -124,7 +129,7 @@ const VoxelInstances: React.FC<{
       }}
     >
       <boxGeometry args={[1, 1, 1]} />
-      <meshBasicMaterial toneMapped={false} vertexColors />
+      <meshBasicMaterial toneMapped={false} />
     </instancedMesh>
   );
 };
