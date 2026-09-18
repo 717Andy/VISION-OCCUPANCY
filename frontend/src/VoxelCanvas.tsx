@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useLayoutEffect, type MutableRefObject } from 'react';
+import React, { useRef, useMemo, type MutableRefObject } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
@@ -50,6 +50,8 @@ const VoxelInstances: React.FC<{
   onSelect: (voxel: VoxelData | null) => void;
 }> = ({ voxelsRef, voxelSize, layers, selected, onSelect }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const colorAttrRef = useRef<THREE.InstancedBufferAttribute>(null!);
+  const colorArray = useMemo(() => new Float32Array(MAX_INSTANCES * 3).fill(1), []);
   const visibleRef = useRef<VoxelData[]>([]);
   const layersRef = useRef(layers);
   const sizeRef = useRef(voxelSize);
@@ -59,20 +61,10 @@ const VoxelInstances: React.FC<{
   sizeRef.current = voxelSize;
   selectedRef.current = selected;
 
-  useLayoutEffect(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    const attr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_INSTANCES * 3), 3);
-    attr.setUsage(THREE.DynamicDrawUsage);
-    for (let i = 0; i < MAX_INSTANCES; i++) attr.setXYZ(i, 1, 1, 1);
-    mesh.instanceColor = attr;
-    const material = mesh.material as THREE.MeshBasicMaterial;
-    material.needsUpdate = true;
-  }, []);
-
   useFrame(() => {
     const mesh = meshRef.current;
-    if (!mesh) return;
+    const colorAttr = colorAttrRef.current;
+    if (!mesh || !colorAttr) return;
     if (voxelsRef.current === lastVoxelsRef.current) return;
     lastVoxelsRef.current = voxelsRef.current;
 
@@ -93,11 +85,7 @@ const VoxelInstances: React.FC<{
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      if (
-        voxel.r != null &&
-        voxel.g != null &&
-        voxel.b != null
-      ) {
+      if (voxel.r != null && voxel.g != null && voxel.b != null) {
         color.setRGB(voxel.r, voxel.g, voxel.b);
       } else {
         color.set(CLASS_COLOR[voxel.cls]);
@@ -110,11 +98,11 @@ const VoxelInstances: React.FC<{
       ) {
         color.offsetHSL(0, 0, 0.25);
       }
-      mesh.setColorAt(i, color);
+      colorAttr.setXYZ(i, color.r, color.g, color.b);
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    colorAttr.needsUpdate = true;
   });
 
   return (
@@ -130,6 +118,12 @@ const VoxelInstances: React.FC<{
     >
       <boxGeometry args={[1, 1, 1]} />
       <meshBasicMaterial toneMapped={false} />
+      <instancedBufferAttribute
+        ref={colorAttrRef}
+        attach="instanceColor"
+        args={[colorArray, 3]}
+        usage={THREE.DynamicDrawUsage}
+      />
     </instancedMesh>
   );
 };
