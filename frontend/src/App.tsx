@@ -107,17 +107,25 @@ export const App: React.FC = () => {
     };
 
     const decodeVoxels = (floats: Float32Array, count: number): VoxelData[] => {
-      const stride = Math.max(1, Math.ceil(count / 900));
+      if (count <= 0) return [];
+      const floatsPer = Math.max(4, Math.floor(floats.length / count));
+      const stride = Math.max(1, Math.ceil(count / 1600));
       const kept = Math.ceil(count / stride);
       const voxelList: VoxelData[] = new Array(kept);
       let written = 0;
       for (let i = 0; i < count; i += stride) {
-        const base = i * 4;
+        const base = i * floatsPer;
         const x = floats[base];
         const y = floats[base + 1];
         const z = floats[base + 2];
         const prob = floats[base + 3];
-        voxelList[written] = { x, y, z, prob, cls: classifyVoxel(x, y, z, prob) };
+        const voxel: VoxelData = { x, y, z, prob, cls: classifyVoxel(x, y, z, prob) };
+        if (floatsPer >= 7) {
+          voxel.r = floats[base + 4];
+          voxel.g = floats[base + 5];
+          voxel.b = floats[base + 6];
+        }
+        voxelList[written] = voxel;
         written += 1;
       }
       return voxelList;
@@ -128,11 +136,17 @@ export const App: React.FC = () => {
       const header = new Uint32Array(buffer, 0, 2);
       const predCount = header[0];
       const gtCount = header[1];
-      const predBytes = predCount * 16;
-      const gtBytes = gtCount * 16;
-      if (buffer.byteLength < 8 + predBytes + gtBytes) return;
-      const predFloats = new Float32Array(buffer, 8, predCount * 4);
-      const gtFloats = new Float32Array(buffer, 8 + predBytes, gtCount * 4);
+      const rest = buffer.byteLength - 8;
+      const total = predCount + gtCount;
+      if (total <= 0) {
+        predVoxelsRef.current = [];
+        gtVoxelsRef.current = [];
+        return;
+      }
+      const floatsPer = rest / 4 / total;
+      if (floatsPer !== 4 && floatsPer !== 7) return;
+      const predFloats = new Float32Array(buffer, 8, predCount * floatsPer);
+      const gtFloats = new Float32Array(buffer, 8 + predCount * floatsPer * 4, gtCount * floatsPer);
       predVoxelsRef.current = decodeVoxels(predFloats, predCount);
       gtVoxelsRef.current = decodeVoxels(gtFloats, gtCount);
     };

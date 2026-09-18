@@ -8,6 +8,9 @@ export interface VoxelData {
   z: number;
   prob: number;
   cls: SemanticClass;
+  r?: number;
+  g?: number;
+  b?: number;
 }
 
 export interface CameraMeta {

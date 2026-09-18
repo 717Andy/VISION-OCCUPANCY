@@ -26,6 +26,12 @@ GRID_X, GRID_Y, GRID_Z = 32, 32, 16
 OCCUPANCY_CACHE_LIMIT = 48
 
 
+def _height_colors(centers: np.ndarray) -> np.ndarray:
+    z = np.asarray(centers, dtype=np.float32).reshape(-1, 3)[:, 2]
+    t = np.clip(z / 8.0, 0.0, 1.0)
+    return np.column_stack((0.35 + 0.2 * t, 0.45 + 0.4 * (1.0 - t), 0.40 + 0.15 * t)).astype(np.float32)
+
+
 class PerceptionPipeline:
     """2D-to-3D occupancy: MiDaS depth + Open3D voxels, with a wave fallback."""
 
@@ -73,7 +79,9 @@ class PerceptionPipeline:
         pred_centers, pred_occ = self._wave_voxels(threshold, time_factor)
         gt_centers, gt_occ = self._wave_voxels(gt_occupancy_threshold(threshold), time_factor)
         self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size=1.0)
-        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ)
+        pred_rgb = _height_colors(pred_centers)
+        gt_rgb = _height_colors(gt_centers)
+        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ, pred_rgb, gt_rgb)
 
     def occupancy_for_frame(
         self,
@@ -129,6 +137,7 @@ class PerceptionPipeline:
             payloads.append(
                 {
                     "disparity": disparity,
+                    "rgb": rgb,
                     "intrinsic": sample.intrinsic,
                     "translation": sample.translation,
                     "rotation": sample.rotation,
@@ -136,13 +145,13 @@ class PerceptionPipeline:
             )
 
         start = time.perf_counter()
-        pred_c, pred_o, gt_c, gt_o, miou = project_cameras_to_voxel_pair(
+        pred_c, pred_o, gt_c, gt_o, miou, pred_rgb, gt_rgb = project_cameras_to_voxel_pair(
             payloads, voxel_size, threshold
         )
         self.last_project_ms = (time.perf_counter() - start) * 1000.0
         self.last_depth_ms = depth_ms
         self.last_miou = miou
-        return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o)
+        return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, pred_rgb, gt_rgb)
 
     def warmup(self) -> None:
         """Load MiDaS, touch Open3D, and cache depth for frame 0."""

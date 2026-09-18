@@ -12,8 +12,9 @@ export type SharedOrbit = {
 
 export function createSharedOrbit(): SharedOrbit {
   return {
-    position: new THREE.Vector3(12, 10, -22),
-    target: new THREE.Vector3(0, 0.4, 10),
+    // CAM_FRONT in ego ≈ (1.72, 0, 1.49); Three.js is (-y, z, x)
+    position: new THREE.Vector3(0, 1.55, 1.85),
+    target: new THREE.Vector3(0, 1.05, 16),
     driver: null,
   };
 }
@@ -31,7 +32,7 @@ interface VoxelCanvasProps {
   orbitId?: string;
 }
 
-const MAX_INSTANCES = 900;
+const MAX_INSTANCES = 1600;
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
@@ -81,7 +82,15 @@ const VoxelInstances: React.FC<{
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      color.set(CLASS_COLOR[voxel.cls]);
+      if (
+        voxel.r != null &&
+        voxel.g != null &&
+        voxel.b != null
+      ) {
+        color.setRGB(voxel.r, voxel.g, voxel.b);
+      } else {
+        color.set(CLASS_COLOR[voxel.cls]);
+      }
       if (
         selectedNow &&
         selectedNow.x === voxel.x &&
@@ -147,7 +156,7 @@ const SyncedOrbitControls: React.FC<{
       makeDefault
       enableDamping
       dampingFactor={0.05}
-      target={[0, 0.4, 10]}
+      target={[0, 1.05, 16]}
       maxDistance={80}
       onStart={() => {
         if (orbitRef && orbitId) orbitRef.current.driver = orbitId;
@@ -183,7 +192,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
       </div>
       <div className="voxel-stage">
         <Canvas
-          camera={{ position: [12, 10, -22], fov: 50 }}
+          camera={{ position: [0, 1.55, 1.85], fov: 42 }}
           onPointerMissed={() => onSelect(null)}
         >
           <color attach="background" args={['#0d1117']} />
@@ -197,6 +206,11 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             selected={selected?.voxel ?? null}
             onSelect={onSelect}
           />
+
+          <mesh position={[0, 0.7, 0]} castShadow={false}>
+            <boxGeometry args={[1.85, 1.4, 4.6]} />
+            <meshBasicMaterial color="#1b1f24" />
+          </mesh>
 
           <Grid
             position={[0, 0, 12]}

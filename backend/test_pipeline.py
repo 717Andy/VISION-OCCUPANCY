@@ -43,7 +43,7 @@ class OccupancyTensorTests(unittest.TestCase):
         pred_n, gt_n = struct.unpack_from("<II", payload, 0)
         self.assertGreater(pred_n, 0)
         self.assertGreaterEqual(gt_n, pred_n)
-        self.assertEqual(len(payload), 8 + (pred_n + gt_n) * 16)
+        self.assertEqual(len(payload), 8 + (pred_n + gt_n) * 28)
         self.assertGreater(pipeline.last_miou, 0.0)
         self.assertLessEqual(pipeline.last_miou, 1.0)
 

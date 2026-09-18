@@ -17,7 +17,9 @@ from projection import (
     pack_occupancy_pair,
     quat_to_rotmat,
     scale_intrinsics,
+    scale_to_camera_height,
     unproject_depth,
+    unproject_depth_colored,
     voxelize_occupancy,
 )
 
@@ -129,6 +131,47 @@ class VoxelizationTests(unittest.TestCase):
         np.testing.assert_allclose(body[:4], [1.0, 2.0, 0.5, 0.9])
         np.testing.assert_allclose(body[4:8], [1.0, 2.0, 0.5, 0.9])
         np.testing.assert_allclose(body[8:], [3.0, 0.0, 1.0, 0.4])
+
+    def test_colored_pair_protocol_includes_rgb(self):
+        pred_c = np.array([[1.0, 2.0, 0.5]], dtype=np.float32)
+        pred_o = np.array([0.9], dtype=np.float32)
+        pred_rgb = np.array([[0.2, 0.4, 0.8]], dtype=np.float32)
+        gt_c = np.array([[1.0, 2.0, 0.5], [3.0, 0.0, 1.0]], dtype=np.float32)
+        gt_o = np.array([0.9, 0.4], dtype=np.float32)
+        gt_rgb = np.array([[0.2, 0.4, 0.8], [0.1, 0.6, 0.2]], dtype=np.float32)
+        payload = pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, pred_rgb, gt_rgb)
+        pred_n, gt_n = np.frombuffer(payload[:8], dtype=np.uint32)
+        self.assertEqual(int(pred_n), 1)
+        self.assertEqual(int(gt_n), 2)
+        body = np.frombuffer(payload[8:], dtype=np.float32)
+        self.assertEqual(body.size, (1 + 2) * 7)
+        np.testing.assert_allclose(body[:7], [1.0, 2.0, 0.5, 0.9, 0.2, 0.4, 0.8])
+
+    def test_unproject_samples_matching_camera_rgb(self):
+        k = np.array([[1.0, 0.0, 0.5], [0.0, 1.0, 0.5], [0.0, 0.0, 1.0]])
+        depth = np.array([[4.0, 5.0], [6.0, 7.0]], dtype=np.float32)
+        rgb = np.array(
+            [[[255, 0, 0], [0, 255, 0]], [[0, 0, 255], [255, 255, 0]]],
+            dtype=np.uint8,
+        )
+        points, colors, vs = unproject_depth_colored(depth, rgb, k, stride=1)
+        self.assertEqual(points.shape[0], colors.shape[0])
+        self.assertEqual(vs.shape[0], points.shape[0])
+        np.testing.assert_allclose(colors[0], [1.0, 0.0, 0.0], atol=1e-5)
+
+    def test_camera_height_puts_road_near_zero(self):
+        translation = np.array([1.7, 0.0, 1.5])
+        vs = np.full(40, 80.0)
+        rel = np.column_stack(
+            (
+                np.full(40, 8.0),
+                np.zeros(40),
+                np.full(40, -3.0),
+            )
+        )
+        pts = translation + rel
+        scaled = scale_to_camera_height(pts, translation, vs, image_height=100)
+        self.assertAlmostEqual(float(np.median(scaled[:, 2])), 0.0, places=5)
 
     def test_lower_threshold_keeps_more_ground_truth_voxels(self):
         rng = np.random.default_rng(0)
