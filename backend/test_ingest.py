@@ -72,7 +72,13 @@ class PlaybackOccupancyTests(unittest.TestCase):
         self.assertEqual(pipeline.voxel_source, "midas-open3d")
         pred_n, gt_n = struct.unpack_from("<II", first, 0)
         self.assertGreater(pred_n, 0)
-        self.assertGreaterEqual(gt_n, pred_n)
+        self.assertGreaterEqual(gt_n, 0)
+        if gt_n:
+            pred = np.frombuffer(first[8 : 8 + pred_n * 16], dtype=np.float32).reshape(pred_n, 4)
+            gt = np.frombuffer(first[8 + pred_n * 16 :], dtype=np.float32).reshape(gt_n, 4)
+            pred_keys = {tuple(np.round(row[:3], 3)) for row in pred}
+            gt_keys = {tuple(np.round(row[:3], 3)) for row in gt}
+            self.assertNotEqual(pred_keys, gt_keys)
         self.assertGreater(struct.unpack_from("<I", second, 0)[0], 0)
         self.assertEqual(pipeline.last_frame_index, 1)
         self.assertGreaterEqual(pipeline.last_miou, 0.0)

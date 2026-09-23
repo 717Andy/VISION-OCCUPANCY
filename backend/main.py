@@ -114,6 +114,7 @@ def telemetry():
                         "last_depth_ms": pipeline.last_depth_ms,
         "last_project_ms": pipeline.last_project_ms,
         "last_miou": pipeline.last_miou,
+        "gt_source": pipeline.gt_source,
         "last_frame_index": pipeline.last_frame_index,
     }
 
@@ -189,6 +190,7 @@ async def occupancy_websocket(websocket: WebSocket):
                             "elapsed_ms": elapsed_ms,
                             "device": pipeline.engine.device,
                             "miou": pipeline.last_miou,
+                            "gt_source": pipeline.gt_source,
                         }
                     )
                 )

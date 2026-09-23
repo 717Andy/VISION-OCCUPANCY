@@ -130,6 +130,19 @@ class VoxelizationTests(unittest.TestCase):
         np.testing.assert_allclose(body[4:8], [1.0, 2.0, 0.5, 0.9])
         np.testing.assert_allclose(body[8:], [3.0, 0.0, 1.0, 0.4])
 
+    def test_lidar_grid_is_not_a_camera_cloud(self):
+        from projection import voxelize_lidar
+
+        camera_like = np.array([[2.0, 1.0, 0.4], [2.05, 1.02, 0.42], [2.02, 0.98, 0.4]], dtype=np.float64)
+        lidar = np.array([[20.0, -8.0, 1.5], [20.1, -8.0, 1.55], [8.0, 4.0, 0.2]], dtype=np.float64)
+        pred_c, _ = voxelize_occupancy(camera_like, voxel_size=0.5, occupancy_threshold=0.0)
+        gt_c, gt_o = voxelize_lidar(lidar, voxel_size=0.5)
+        self.assertGreater(gt_c.shape[0], 0)
+        self.assertEqual(gt_o.shape[0], gt_c.shape[0])
+        pred_keys = {tuple(np.round(row, 2)) for row in pred_c}
+        gt_keys = {tuple(np.round(row, 2)) for row in gt_c}
+        self.assertTrue(gt_keys.isdisjoint(pred_keys))
+
     def test_lower_threshold_keeps_more_ground_truth_voxels(self):
         rng = np.random.default_rng(0)
         clustered = rng.normal(loc=[2.0, 1.0, 0.5], scale=0.04, size=(40, 3))
