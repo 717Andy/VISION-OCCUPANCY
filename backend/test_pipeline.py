@@ -3,6 +3,8 @@ import struct
 import time
 import unittest
 
+import numpy as np
+
 from nuscenes_loader import CAMERA_IDS
 from pipeline import PerceptionPipeline
 
@@ -37,15 +39,36 @@ class OccupancyTensorTests(unittest.TestCase):
             self.assertTrue(math.isfinite(prob))
 
 
-    def test_occupancy_pair_has_denser_ground_truth(self):
+    def test_ground_truth_comes_from_lidar_not_the_prediction(self):
         pipeline = PerceptionPipeline()
-        payload = pipeline.generate_occupancy_pair(threshold=0.5)
+        lidar = np.array(
+            [[12.0, 0.0, 0.4], [12.15, 0.05, 0.45], [18.0, -3.0, 1.2]],
+            dtype=np.float32,
+        )
+        payload = pipeline.generate_occupancy_pair(
+            threshold=0.5, frame_index=3, voxel_size=0.5, lidar_points=lidar
+        )
         pred_n, gt_n = struct.unpack_from("<II", payload, 0)
         self.assertGreater(pred_n, 0)
-        self.assertGreaterEqual(gt_n, pred_n)
+        self.assertGreater(gt_n, 0)
         self.assertEqual(len(payload), 8 + (pred_n + gt_n) * 16)
-        self.assertGreater(pipeline.last_miou, 0.0)
-        self.assertLessEqual(pipeline.last_miou, 1.0)
+        self.assertEqual(pipeline.gt_source, "lidar-top")
+        self.assertLess(pipeline.last_miou, 1.0)
+        gt = np.frombuffer(payload[8 + pred_n * 16 :], dtype=np.float32).reshape(gt_n, 4)
+        self.assertTrue(np.any(np.abs(gt[:, 0] - 12.0) < 1.0))
+
+    def test_missing_lidar_does_not_copy_prediction(self):
+        pipeline = PerceptionPipeline()
+        payload = pipeline.generate_occupancy_pair(
+            threshold=0.5,
+            frame_index=99_999,
+            voxel_size=1.0,
+            lidar_points=np.zeros((0, 3), dtype=np.float32),
+        )
+        pred_n, gt_n = struct.unpack_from("<II", payload, 0)
+        self.assertGreater(pred_n, 0)
+        self.assertEqual(gt_n, 0)
+        self.assertEqual(pipeline.gt_source, "unavailable")
 
     def test_vectorized_generation_is_realtime(self):
         pipeline = PerceptionPipeline()

@@ -207,6 +207,32 @@ def voxelize_occupancy(
     return centers, occ
 
 
+def voxelize_lidar(
+    points: np.ndarray,
+    voxel_size: float,
+    bounds: np.ndarray = EGO_BOUNDS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Voxelize ego-frame lidar returns. A cell is occupied if it contains a return.
+
+    This grid is independent of the camera depth cloud and ignores the vision
+    occupancy slider so Ground Truth stays the sensor measurement.
+    """
+    size = float(max(voxel_size, 0.05))
+    pts = clip_to_bounds(points, bounds)
+    if pts.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+
+    origin = bounds[:, 0]
+    idx = np.floor((pts - origin) / size).astype(np.int32)
+    uniq, counts = np.unique(idx, axis=0, return_counts=True)
+    ref = max(float(np.percentile(counts, 90)), 1.0)
+    occupancy = np.clip(counts.astype(np.float32) / ref, 0.0, 1.0)
+    centers = (origin + (uniq.astype(np.float64) + 0.5) * size).astype(np.float32)
+    centers, occupancy = _cap_voxels(centers, occupancy)
+    _touch_open3d(centers, size)
+    return centers, occupancy
+
+
 def pack_occupancy(centers: np.ndarray, occupancy: np.ndarray) -> bytes:
     """Binary protocol: uint32 count + float32 x,y,z,prob per voxel."""
     packed = np.column_stack(
@@ -365,27 +391,14 @@ def project_cameras_to_voxels(
 
 def project_cameras_to_voxel_pair(
     camera_payloads: list[dict[str, Any]],
+    lidar_points: np.ndarray,
     voxel_size: float,
     occupancy_threshold: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
-    """Prediction + denser GT occupancy from one fused cloud, plus grid mIoU."""
-    merged = fuse_camera_points(camera_payloads)
-    size = float(max(voxel_size, 0.05))
-    pts = clip_to_bounds(merged, EGO_BOUNDS)
-    if pts.shape[0] == 0:
-        empty = np.zeros((0, 3), dtype=np.float32)
-        empty_occ = np.zeros((0,), dtype=np.float32)
-        return empty, empty_occ, empty, empty_occ, 1.0
-
-    origin = pts.min(axis=0)
-    pred_centers, pred_occ = voxelize_aligned(pts, size, occupancy_threshold, origin)
-    gt_centers, gt_occ = voxelize_aligned(
-        pts, size, gt_occupancy_threshold(occupancy_threshold), origin
+    """Vision occupancy from cameras, ground truth from lidar, plus grid mIoU."""
+    pred_centers, pred_occ = project_cameras_to_voxels(
+        camera_payloads, voxel_size, occupancy_threshold
     )
-    miou = grid_miou(pred_centers, gt_centers, size, origin)
-    pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
-    gt_centers, gt_occ = _gt_display_voxels(
-        pred_centers, pred_occ, gt_centers, gt_occ, size, origin
-    )
-    _touch_open3d(pred_centers, size)
+    gt_centers, gt_occ = voxelize_lidar(lidar_points, voxel_size)
+    miou = grid_miou(pred_centers, gt_centers, voxel_size)
     return pred_centers, pred_occ, gt_centers, gt_occ, miou

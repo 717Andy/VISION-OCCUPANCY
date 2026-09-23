@@ -10,14 +10,15 @@ from typing import Any
 
 import numpy as np
 
+from lidar_gt import load_lidar_ego_points
 from midas_engine import MidasDepthEngine
 from nuscenes_loader import CAMERA_IDS, ClipNotPrepared, load_rgb, load_synchronized_frame
 from projection import (
     grid_miou,
-    gt_occupancy_threshold,
     pack_occupancy,
     pack_occupancy_pair,
     project_cameras_to_voxel_pair,
+    voxelize_lidar,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class PerceptionPipeline:
         self.last_miou = 0.0
         self.last_frame_index = 0
         self.voxel_source = "trigonometric-wave"
+        self.gt_source = "unavailable"
         self.engine = depth_engine if depth_engine is not None else MidasDepthEngine()
         self._occupancy_cache: OrderedDict[tuple[int, float, float], tuple[bytes, float]] = OrderedDict()
         self._cache_lock = threading.Lock()
@@ -66,14 +68,34 @@ class PerceptionPipeline:
         centers, occupancy = self._wave_voxels(threshold, time_factor)
         return pack_occupancy(centers, occupancy)
 
-    def generate_occupancy_pair(self, threshold: float = 0.4) -> bytes:
-        """Prediction + denser GT wave grids for Split GT when MiDaS is unavailable."""
+    def _pack_with_lidar(
+        self,
+        frame_index: int,
+        pred_centers: np.ndarray,
+        pred_occ: np.ndarray,
+        voxel_size: float,
+        lidar_points: np.ndarray | None = None,
+    ) -> bytes:
+        points = load_lidar_ego_points(frame_index) if lidar_points is None else lidar_points
+        gt_centers, gt_occ = voxelize_lidar(points, voxel_size)
+        self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size)
+        self.gt_source = "lidar-top" if gt_centers.shape[0] else "unavailable"
+        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ)
+
+    def generate_occupancy_pair(
+        self,
+        threshold: float = 0.4,
+        frame_index: int = 0,
+        voxel_size: float = 1.0,
+        lidar_points: np.ndarray | None = None,
+    ) -> bytes:
+        """Wave prediction plus lidar ground truth when the depth model is unavailable."""
         self.frame_count += 1
         time_factor = np.float32(self.frame_count * 0.1)
         pred_centers, pred_occ = self._wave_voxels(threshold, time_factor)
-        gt_centers, gt_occ = self._wave_voxels(gt_occupancy_threshold(threshold), time_factor)
-        self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size=1.0)
-        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ)
+        return self._pack_with_lidar(
+            frame_index, pred_centers, pred_occ, voxel_size, lidar_points
+        )
 
     def occupancy_for_frame(
         self,
@@ -96,18 +118,24 @@ class PerceptionPipeline:
 
         if not self.engine.ensure_loaded():
             self.voxel_source = "trigonometric-wave"
-            payload = self.generate_occupancy_pair(threshold=threshold)
+            payload = self.generate_occupancy_pair(
+                threshold=threshold, frame_index=frame_index, voxel_size=voxel_size
+            )
         else:
             try:
                 payload = self._midas_occupancy(frame_index, voxel_size, threshold)
                 self.voxel_source = "midas-open3d"
             except ClipNotPrepared:
                 self.voxel_source = "trigonometric-wave"
-                payload = self.generate_occupancy_pair(threshold=threshold)
+                payload = self.generate_occupancy_pair(
+                    threshold=threshold, frame_index=frame_index, voxel_size=voxel_size
+                )
             except Exception as exc:
                 logger.warning("MiDaS occupancy failed for frame %s: %s", frame_index, exc)
                 self.voxel_source = "trigonometric-wave"
-                payload = self.generate_occupancy_pair(threshold=threshold)
+                payload = self.generate_occupancy_pair(
+                    threshold=threshold, frame_index=frame_index, voxel_size=voxel_size
+                )
 
         with self._cache_lock:
             self._occupancy_cache[key] = (payload, float(self.last_miou))
@@ -137,11 +165,15 @@ class PerceptionPipeline:
 
         start = time.perf_counter()
         pred_c, pred_o, gt_c, gt_o, miou = project_cameras_to_voxel_pair(
-            payloads, voxel_size, threshold
+            payloads,
+            load_lidar_ego_points(frame_index),
+            voxel_size,
+            threshold,
         )
         self.last_project_ms = (time.perf_counter() - start) * 1000.0
         self.last_depth_ms = depth_ms
         self.last_miou = miou
+        self.gt_source = "lidar-top" if gt_c.shape[0] else "unavailable"
         return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o)
 
     def warmup(self) -> None:

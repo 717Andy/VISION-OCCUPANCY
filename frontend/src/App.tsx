@@ -268,7 +268,7 @@ export const App: React.FC = () => {
           <VoxelCanvas
             className="pane pane-voxel pane-gt"
             title="Ground Truth"
-            subtitle="Sensor Occupancy Grid"
+            subtitle="nuScenes LiDAR"
             voxelsRef={gtVoxelsRef}
             voxelSize={controls.voxelSize}
             layers={controls.layers}
@@ -281,7 +281,7 @@ export const App: React.FC = () => {
         <VoxelCanvas
           className="pane pane-voxel pane-pred"
           title="Vision Prediction"
-          subtitle="3D Voxel Grid Scene"
+          subtitle="MiDaS + Open3D"
           voxelsRef={predVoxelsRef}
           voxelSize={controls.voxelSize}
           layers={controls.layers}
