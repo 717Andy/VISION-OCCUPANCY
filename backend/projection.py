@@ -2,8 +2,10 @@
 
 Pinhole unprojection follows P_3D = d · K^{-1} · [u, v, 1]^T, then the
 camera-to-ego extrinsics stored with each nuScenes sample. Relative
-disparity is mapped to metric depth with a scale-and-shift inverse-depth
-fit onto the physical interval [0.5 m, 50 m].
+disparity is an inverse-depth signal. Each camera is scaled so rays that
+see the road meet the ego ground plane (z = 0) at the calibrated camera
+height. A fixed [0.5 m, 50 m] stretch remains as the fallback when that
+fit is unavailable.
 """
 
 from __future__ import annotations
@@ -47,6 +49,96 @@ def scale_intrinsics(K: np.ndarray, src_wh: tuple[int, int], dst_wh: tuple[int, 
     return k
 
 
+def _fit_inverse_depth(disparity: np.ndarray, inv_depth: np.ndarray) -> tuple[float, float] | None:
+    """Least-squares 1/d = a · disparity + b, refit on relative-depth inliers."""
+
+    def solve(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float]:
+        design = np.column_stack((xs, np.ones(xs.shape[0], dtype=np.float64)))
+        slope, intercept = np.linalg.lstsq(design, ys, rcond=None)[0]
+        return float(slope), float(intercept)
+
+    slope, intercept = solve(disparity, inv_depth)
+    if not np.isfinite(slope) or slope <= 1e-8:
+        return None
+    predicted = slope * disparity + intercept
+    depth_hat = 1.0 / np.clip(predicted, 1e-6, None)
+    depth_true = 1.0 / inv_depth
+    inliers = np.abs(depth_hat - depth_true) / depth_true < 0.25
+    needed = max(32, int(0.2 * disparity.shape[0]))
+    if int(np.count_nonzero(inliers)) < needed:
+        return None
+    slope, intercept = solve(disparity[inliers], inv_depth[inliers])
+    if not np.isfinite(slope) or not np.isfinite(intercept) or slope <= 1e-8:
+        return None
+    return slope, intercept
+
+
+def _apply_inverse_depth(disparity: np.ndarray, slope: float, intercept: float) -> np.ndarray:
+    inverse = slope * np.asarray(disparity, dtype=np.float64) + intercept
+    depth = np.full(inverse.shape, FAR_M, dtype=np.float64)
+    valid = np.isfinite(inverse) & (inverse > 1.0 / (FAR_M * 1.5))
+    depth[valid] = 1.0 / inverse[valid]
+    return np.clip(depth, NEAR_M, FAR_M).astype(np.float32)
+
+
+def metric_depth_from_ground(
+    disparity: np.ndarray,
+    K: np.ndarray,
+    rotation_wxyz: np.ndarray,
+    translation: np.ndarray,
+    z_ground: float = 0.0,
+) -> np.ndarray:
+    """Scale relative disparity so road rays intersect the ego ground plane.
+
+    For a pixel whose ray points downward, the metric depth that lands on
+    z = `z_ground` is fixed by the camera height. MiDaS only supplies the
+    inverse-depth shape: 1/d = a · disparity + b, fit on the lower image
+    and applied to the whole frame. Objects closer than the road stay
+    closer, so they lift above the plane. Falls back to the fixed
+    [near, far] stretch when the camera has no usable road samples.
+    """
+    disp = np.asarray(disparity, dtype=np.float64)
+    if disp.ndim != 2:
+        raise ValueError(f"Disparity must be a 2D array, got shape {disp.shape}")
+    fallback = disparity_to_metric_depth(disp)
+    cam_z = float(np.asarray(translation, dtype=np.float64).reshape(3)[2])
+    if cam_z < 0.3:
+        return fallback
+
+    height, width = disp.shape
+    stride = 8
+    us = np.arange(0, width, stride, dtype=np.float64) + 0.5
+    vs = np.arange(0, height, stride, dtype=np.float64) + 0.5
+    if us.size == 0 or vs.size == 0:
+        return fallback
+    uu, vv = np.meshgrid(us, vs)
+    samples = disp[::stride, ::stride][: uu.shape[0], : uu.shape[1]]
+    pixels = np.stack(
+        (uu.ravel(), vv.ravel(), np.ones(uu.size, dtype=np.float64)),
+        axis=0,
+    )
+    k_inv = np.linalg.inv(np.asarray(K, dtype=np.float64).reshape(3, 3))
+    ray_z = (quat_to_rotmat(rotation_wxyz) @ (k_inv @ pixels))[2]
+    safe_z = np.where(np.abs(ray_z) < 1e-4, np.nan, ray_z)
+    ground_depth = (float(z_ground) - cam_z) / safe_z
+    flat = samples.ravel()
+    road = (
+        (ray_z < -0.05)
+        & (ground_depth > 4.0)
+        & (ground_depth < 30.0)
+        & (vv.ravel() > height * 0.55)
+        & np.isfinite(flat)
+        & (flat > 0.0)
+    )
+    if int(np.count_nonzero(road)) < 32:
+        return fallback
+
+    fit = _fit_inverse_depth(flat[road], 1.0 / ground_depth[road])
+    if fit is None:
+        return fallback
+    return _apply_inverse_depth(disp, fit[0], fit[1])
+
+
 def disparity_to_metric_depth(
     disparity: np.ndarray,
     near: float = NEAR_M,
@@ -59,7 +151,8 @@ def disparity_to_metric_depth(
 
         d = 1 / (r · (1/near − 1/far) + 1/far)
 
-    so r=1 maps to `near` and r=0 maps to `far`.
+    so r=1 maps to `near` and r=0 maps to `far`. This ignores camera height;
+    `metric_depth_from_ground` is the live path.
     """
     disp = np.asarray(disparity, dtype=np.float32)
     dmin = float(np.min(disp))
@@ -190,6 +283,9 @@ def voxelize_occupancy(
     voxel_size: float,
     occupancy_threshold: float = 0.38,
     bounds: np.ndarray = EGO_BOUNDS,
+    *,
+    origin: np.ndarray | None = None,
+    cap: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Convert a metric point cloud into a discrete occupancy grid.
 
@@ -201,9 +297,12 @@ def voxelize_occupancy(
     if pts.shape[0] == 0:
         return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.float32)
 
-    origin = pts.min(axis=0)
-    centers, occ = _voxelize_numpy(pts, size, occupancy_threshold, bounds, origin=origin)
-    _touch_open3d(centers, size)
+    grid_origin = pts.min(axis=0) if origin is None else np.asarray(origin, dtype=np.float64)
+    centers, occ = _voxelize_numpy(
+        pts, size, occupancy_threshold, bounds, origin=grid_origin, cap=cap
+    )
+    if cap:
+        _touch_open3d(centers, size)
     return centers, occ
 
 
@@ -211,6 +310,8 @@ def voxelize_lidar(
     points: np.ndarray,
     voxel_size: float,
     bounds: np.ndarray = EGO_BOUNDS,
+    *,
+    cap: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Voxelize ego-frame lidar returns. A cell is occupied if it contains a return.
 
@@ -228,8 +329,9 @@ def voxelize_lidar(
     ref = max(float(np.percentile(counts, 90)), 1.0)
     occupancy = np.clip(counts.astype(np.float32) / ref, 0.0, 1.0)
     centers = (origin + (uniq.astype(np.float64) + 0.5) * size).astype(np.float32)
-    centers, occupancy = _cap_voxels(centers, occupancy)
-    _touch_open3d(centers, size)
+    if cap:
+        centers, occupancy = _cap_voxels(centers, occupancy)
+        _touch_open3d(centers, size)
     return centers, occupancy
 
 
@@ -303,7 +405,12 @@ def fuse_camera_points(camera_payloads: list[dict[str, Any]]) -> np.ndarray:
             ORIGINAL_IMAGE_SIZE,
             (width, height),
         )
-        metric = disparity_to_metric_depth(disparity)
+        metric = metric_depth_from_ground(
+            disparity,
+            k_depth,
+            payload["rotation"],
+            payload["translation"],
+        )
         cam_pts = unproject_depth(metric, k_depth)
         ego_pts = camera_to_ego(cam_pts, payload["rotation"], payload["translation"])
         clouds.append(ego_pts)
@@ -395,10 +502,26 @@ def project_cameras_to_voxel_pair(
     voxel_size: float,
     occupancy_threshold: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
-    """Vision occupancy from cameras, ground truth from lidar, plus grid mIoU."""
-    pred_centers, pred_occ = project_cameras_to_voxels(
-        camera_payloads, voxel_size, occupancy_threshold
+    """Vision occupancy from cameras, ground truth from lidar, plus grid mIoU.
+
+    mIoU is measured on the full grids, sharing the ego-bounds origin, before
+    the display cap. The cap is only a transport limit and would otherwise
+    drop overlapping cells.
+    """
+    origin = EGO_BOUNDS[:, 0]
+    merged = fuse_camera_points(camera_payloads)
+    pred_centers, pred_occ = voxelize_occupancy(
+        merged,
+        voxel_size,
+        occupancy_threshold,
+        origin=origin,
+        cap=False,
     )
-    gt_centers, gt_occ = voxelize_lidar(lidar_points, voxel_size)
-    miou = grid_miou(pred_centers, gt_centers, voxel_size)
+    gt_centers, gt_occ = voxelize_lidar(lidar_points, voxel_size, cap=False)
+    miou = grid_miou(pred_centers, gt_centers, voxel_size, origin=origin)
+    pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
+    gt_centers, gt_occ = _cap_voxels(gt_centers, gt_occ)
+    size = float(max(voxel_size, 0.05))
+    _touch_open3d(pred_centers, size)
+    _touch_open3d(gt_centers, size)
     return pred_centers, pred_occ, gt_centers, gt_occ, miou
