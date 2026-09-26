@@ -269,7 +269,12 @@ def _voxelize_numpy(
     uniq, counts = np.unique(idx, axis=0, return_counts=True)
     ref = max(float(np.percentile(counts, 75)), 3.0)
     occupancy = np.clip(counts.astype(np.float32) / ref, 0.0, 1.0)
-    keep = occupancy >= np.float32(occupancy_threshold)
+    centers_all = (origin + (uniq.astype(np.float64) + 0.5) * voxel_size).astype(np.float32)
+    # The road is much denser than cars, so a percentile threshold deletes
+    # the elevated surface. Image stride often leaves one hit in an object
+    # cell, same as a lidar return, so keep every raised cell.
+    elevated = centers_all[:, 2] >= np.float32(0.5)
+    keep = (occupancy >= np.float32(occupancy_threshold)) | elevated
     kept = uniq[keep]
     occ = occupancy[keep]
     centers = (origin + (kept.astype(np.float64) + 0.5) * voxel_size).astype(np.float32)
@@ -367,26 +372,59 @@ def grid_miou(
     gt_centers: np.ndarray,
     voxel_size: float,
     origin: np.ndarray | None = None,
+    tolerance: int = 0,
 ) -> float:
-    """Binary occupancy IoU on quantized voxel indices."""
+    """Occupancy IoU on quantized voxel indices.
+
+    `tolerance` is a Chebyshev radius in cells. A depth surface and a
+    single-sweep lidar shell often miss by one 0.2 m bin; radius 1 counts
+    that neighbor as overlap. Radius 0 is exact cell equality.
+    """
     size = float(max(voxel_size, 0.05))
     origin_vec = np.zeros(3, dtype=np.float64) if origin is None else np.asarray(origin, dtype=np.float64)
+    radius = max(int(tolerance), 0)
 
     def keys(centers: np.ndarray) -> set[tuple[int, int, int]]:
         pts = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
         if pts.size == 0:
             return set()
         idx = np.floor((pts - origin_vec) / size).astype(np.int64)
-        return {tuple(row) for row in idx.tolist()}
+        return {tuple(int(v) for v in row) for row in idx.tolist()}
 
     pred_keys = keys(pred_centers)
     gt_keys = keys(gt_centers)
     if not pred_keys and not gt_keys:
         return 1.0
-    union = pred_keys | gt_keys
-    if not union:
+    if radius == 0:
+        union = pred_keys | gt_keys
+        if not union:
+            return 1.0
+        return float(len(pred_keys & gt_keys) / len(union))
+
+    def within(source: set[tuple[int, int, int]], target: set[tuple[int, int, int]]) -> int:
+        matched = 0
+        for x, y, z in source:
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    for dz in range(-radius, radius + 1):
+                        if (x + dx, y + dy, z + dz) in target:
+                            matched += 1
+                            break
+                    else:
+                        continue
+                    break
+                else:
+                    continue
+                break
+        return matched
+
+    true_positive = within(pred_keys, gt_keys)
+    false_negative = len(gt_keys) - within(gt_keys, pred_keys)
+    false_positive = len(pred_keys) - true_positive
+    denom = true_positive + false_positive + false_negative
+    if denom == 0:
         return 1.0
-    return float(len(pred_keys & gt_keys) / len(union))
+    return float(true_positive / denom)
 
 
 def gt_occupancy_threshold(occupancy_threshold: float) -> float:
@@ -518,7 +556,9 @@ def project_cameras_to_voxel_pair(
         cap=False,
     )
     gt_centers, gt_occ = voxelize_lidar(lidar_points, voxel_size, cap=False)
-    miou = grid_miou(pred_centers, gt_centers, voxel_size, origin=origin)
+    # One cell of slack: the lidar shell and the depth sheet share a surface
+    # but rarely the identical 0.2 m bin.
+    miou = grid_miou(pred_centers, gt_centers, voxel_size, origin=origin, tolerance=1)
     pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
     gt_centers, gt_occ = _cap_voxels(gt_centers, gt_occ)
     size = float(max(voxel_size, 0.05))

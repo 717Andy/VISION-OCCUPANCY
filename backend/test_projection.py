@@ -233,6 +233,25 @@ class VoxelizationTests(unittest.TestCase):
         empty = np.zeros((0, 3), dtype=np.float32)
         self.assertAlmostEqual(grid_miou(empty, empty, voxel_size=1.0), 1.0)
 
+    def test_one_cell_tolerance_counts_a_neighbor(self):
+        left = np.array([[0.1, 0.1, 0.1]], dtype=np.float32)
+        neighbor = np.array([[0.3, 0.1, 0.1]], dtype=np.float32)
+        far = np.array([[2.1, 0.1, 0.1]], dtype=np.float32)
+        self.assertAlmostEqual(grid_miou(left, neighbor, voxel_size=0.2), 0.0)
+        self.assertAlmostEqual(grid_miou(left, neighbor, voxel_size=0.2, tolerance=1), 1.0)
+        self.assertAlmostEqual(grid_miou(left, far, voxel_size=0.2, tolerance=1), 0.0)
+
+    def test_elevated_cells_survive_a_road_dominated_threshold(self):
+        road = np.tile(np.array([[2.0, 0.0, 0.1]], dtype=np.float64), (40, 1))
+        road += np.array([[0.02, 0.0, 0.0]])
+        car = np.array([[6.1, 1.0, 1.6], [6.1, 1.0, 1.6]], dtype=np.float64)
+        centers, _ = voxelize_occupancy(
+            np.vstack([road, car]),
+            voxel_size=0.2,
+            occupancy_threshold=0.9,
+        )
+        self.assertTrue(np.any(centers[:, 2] > 1.0))
+
 
 if __name__ == "__main__":
     unittest.main()
