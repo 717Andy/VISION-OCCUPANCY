@@ -352,19 +352,67 @@ def pack_occupancy(centers: np.ndarray, occupancy: np.ndarray) -> bytes:
     return header.tobytes() + packed.tobytes()
 
 
+def _cell_index_map(
+    centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray,
+) -> dict[tuple[int, int, int], np.ndarray]:
+    pts = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
+    if pts.size == 0:
+        return {}
+    idx = np.floor((pts - origin) / voxel_size).astype(np.int64)
+    uniq, first = np.unique(idx, axis=0, return_index=True)
+    return {tuple(int(v) for v in ijk): pts[i].astype(np.float32) for ijk, i in zip(uniq, first)}
+
+
+def discrepancy_voxels(
+    pred_centers: np.ndarray,
+    gt_centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+    *,
+    cap: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cells occupied in exactly one of the two grids.
+
+    Indices use the same origin and voxel size as `grid_miou`, so a cell that
+    both matrices occupy is not a discrepancy even if the float centers differ
+    by a rounding error.
+    """
+    size = float(max(voxel_size, 0.05))
+    origin_vec = np.zeros(3, dtype=np.float64) if origin is None else np.asarray(origin, dtype=np.float64)
+    pred = _cell_index_map(pred_centers, size, origin_vec)
+    gt = _cell_index_map(gt_centers, size, origin_vec)
+    only = (pred.keys() - gt.keys()) | (gt.keys() - pred.keys())
+    if not only:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+    centers = np.stack([pred[key] if key in pred else gt[key] for key in sorted(only)]).astype(np.float32)
+    occupancy = np.ones((centers.shape[0],), dtype=np.float32)
+    if cap:
+        return _cap_voxels(centers, occupancy)
+    return centers, occupancy
+
+
 def pack_occupancy_pair(
     pred_centers: np.ndarray,
     pred_occupancy: np.ndarray,
     gt_centers: np.ndarray,
     gt_occupancy: np.ndarray,
+    err_centers: np.ndarray | None = None,
+    err_occupancy: np.ndarray | None = None,
 ) -> bytes:
-    """Dual-view protocol: uint32 pred_count, uint32 gt_count, then both grids."""
+    """Dual-view protocol: uint32 pred, gt, and discrepancy counts, then the grids."""
+    if err_centers is None or err_occupancy is None:
+        err_centers = np.zeros((0, 3), dtype=np.float32)
+        err_occupancy = np.zeros((0,), dtype=np.float32)
     pred = pack_occupancy(pred_centers, pred_occupancy)
     gt = pack_occupancy(gt_centers, gt_occupancy)
+    err = pack_occupancy(err_centers, err_occupancy)
     pred_count = np.frombuffer(pred[:4], dtype=np.uint32)[0]
     gt_count = np.frombuffer(gt[:4], dtype=np.uint32)[0]
-    header = np.array([pred_count, gt_count], dtype=np.uint32)
-    return header.tobytes() + pred[4:] + gt[4:]
+    err_count = np.frombuffer(err[:4], dtype=np.uint32)[0]
+    header = np.array([pred_count, gt_count, err_count], dtype=np.uint32)
+    return header.tobytes() + pred[4:] + gt[4:] + err[4:]
 
 
 def grid_miou(
@@ -559,9 +607,10 @@ def project_cameras_to_voxel_pair(
     # One cell of slack: the lidar shell and the depth sheet share a surface
     # but rarely the identical 0.2 m bin.
     miou = grid_miou(pred_centers, gt_centers, voxel_size, origin=origin, tolerance=1)
+    err_centers, err_occ = discrepancy_voxels(pred_centers, gt_centers, voxel_size, origin=origin)
     pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
     gt_centers, gt_occ = _cap_voxels(gt_centers, gt_occ)
     size = float(max(voxel_size, 0.05))
     _touch_open3d(pred_centers, size)
     _touch_open3d(gt_centers, size)
-    return pred_centers, pred_occ, gt_centers, gt_occ, miou
+    return pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ, miou

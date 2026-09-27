@@ -48,13 +48,16 @@ class OccupancyTensorTests(unittest.TestCase):
         payload = pipeline.generate_occupancy_pair(
             threshold=0.5, frame_index=3, voxel_size=0.5, lidar_points=lidar
         )
-        pred_n, gt_n = struct.unpack_from("<II", payload, 0)
+        pred_n, gt_n, err_n = struct.unpack_from("<III", payload, 0)
         self.assertGreater(pred_n, 0)
         self.assertGreater(gt_n, 0)
-        self.assertEqual(len(payload), 8 + (pred_n + gt_n) * 16)
+        self.assertGreater(err_n, 0)
+        self.assertEqual(len(payload), 12 + (pred_n + gt_n + err_n) * 16)
         self.assertEqual(pipeline.gt_source, "lidar-top")
         self.assertLess(pipeline.last_miou, 1.0)
-        gt = np.frombuffer(payload[8 + pred_n * 16 :], dtype=np.float32).reshape(gt_n, 4)
+        gt = np.frombuffer(
+            payload[12 + pred_n * 16 : 12 + (pred_n + gt_n) * 16], dtype=np.float32
+        ).reshape(gt_n, 4)
         self.assertTrue(np.any(np.abs(gt[:, 0] - 12.0) < 1.0))
 
     def test_missing_lidar_does_not_copy_prediction(self):
@@ -65,9 +68,11 @@ class OccupancyTensorTests(unittest.TestCase):
             voxel_size=1.0,
             lidar_points=np.zeros((0, 3), dtype=np.float32),
         )
-        pred_n, gt_n = struct.unpack_from("<II", payload, 0)
+        pred_n, gt_n, err_n = struct.unpack_from("<III", payload, 0)
         self.assertGreater(pred_n, 0)
         self.assertEqual(gt_n, 0)
+        self.assertGreater(err_n, 0)
+        self.assertLessEqual(err_n, pred_n)
         self.assertEqual(pipeline.gt_source, "unavailable")
 
     def test_vectorized_generation_is_realtime(self):
