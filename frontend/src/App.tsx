@@ -281,7 +281,7 @@ export const App: React.FC = () => {
         <VoxelCanvas
           className="pane pane-voxel pane-pred"
           title="Vision Prediction"
-          subtitle="MiDaS + Open3D"
+          subtitle="MiDaS, ground-aligned"
           voxelsRef={predVoxelsRef}
           voxelSize={controls.voxelSize}
           layers={controls.layers}

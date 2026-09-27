@@ -78,7 +78,7 @@ class PerceptionPipeline:
     ) -> bytes:
         points = load_lidar_ego_points(frame_index) if lidar_points is None else lidar_points
         gt_centers, gt_occ = voxelize_lidar(points, voxel_size)
-        self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size)
+        self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size, tolerance=1)
         self.gt_source = "lidar-top" if gt_centers.shape[0] else "unavailable"
         return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ)
 

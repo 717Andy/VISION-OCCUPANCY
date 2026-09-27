@@ -13,6 +13,7 @@ from projection import (
     disparity_to_metric_depth,
     grid_miou,
     gt_occupancy_threshold,
+    metric_depth_from_ground,
     pack_occupancy,
     pack_occupancy_pair,
     quat_to_rotmat,
@@ -54,6 +55,74 @@ class MetricDepthTests(unittest.TestCase):
         self.assertTrue(np.isfinite(depth).all())
         self.assertTrue(np.all(depth >= NEAR_M))
         self.assertTrue(np.all(depth <= FAR_M))
+
+
+class GroundAlignmentTests(unittest.TestCase):
+    """Road rays use camera height, not the fixed [0.5 m, 50 m] stretch."""
+
+    FRONT_ROT = np.array(
+        [0.5077241387638071, -0.4973392230703816, 0.49837167536166627, -0.4964832014373754]
+    )
+    FRONT_T = np.array([1.72200568478, 0.00475453292289, 1.49491291905])
+
+    def _road_disparity(self) -> tuple[np.ndarray, np.ndarray]:
+        height, width = 96, 128
+        intrinsic = np.array(
+            [[140.0, 0.0, width / 2.0], [0.0, 140.0, height / 2.0], [0.0, 0.0, 1.0]]
+        )
+        us = np.arange(width, dtype=np.float64) + 0.5
+        vs = np.arange(height, dtype=np.float64) + 0.5
+        uu, vv = np.meshgrid(us, vs)
+        pixels = np.stack((uu.ravel(), vv.ravel(), np.ones(uu.size)), axis=0)
+        ray_z = (quat_to_rotmat(self.FRONT_ROT) @ (np.linalg.inv(intrinsic) @ pixels))[2]
+        ground_depth = (0.0 - self.FRONT_T[2]) / np.where(np.abs(ray_z) < 1e-4, np.nan, ray_z)
+        disparity = np.full(uu.size, 1.0, dtype=np.float64)
+        road = (ray_z < -0.05) & (ground_depth > 4.0) & (ground_depth < 30.0)
+        disparity[road] = 20.0 / ground_depth[road] + 1.0
+        disparity = disparity.reshape(height, width)
+        # A closer patch must stay above the plane after the same scale.
+        disparity[70:85, 50:70] *= 2.2
+        return disparity.astype(np.float32), intrinsic
+
+    def test_road_cloud_sits_on_the_ego_ground_plane(self):
+        disparity, intrinsic = self._road_disparity()
+        depth = metric_depth_from_ground(disparity, intrinsic, self.FRONT_ROT, self.FRONT_T)
+        ego = camera_to_ego(
+            unproject_depth(depth, intrinsic, stride=2),
+            self.FRONT_ROT,
+            self.FRONT_T,
+        )
+        span = ego[(ego[:, 0] > 5.0) & (ego[:, 0] < 25.0) & (np.abs(ego[:, 1]) < 6.0)]
+        self.assertGreater(span.shape[0], 30)
+        road = span[span[:, 2] < 0.4]
+        self.assertGreater(road.shape[0], 20)
+        self.assertLess(abs(float(np.median(road[:, 2]))), 0.2)
+        # The boosted patch is closer than the road along the same ray, so it lifts off z = 0.
+        self.assertLess(float(depth[77, 60]), 4.0)
+        ray = np.linalg.inv(intrinsic) @ np.array([60.5, 77.5, 1.0])
+        patch = camera_to_ego((float(depth[77, 60]) * ray).reshape(1, 3), self.FRONT_ROT, self.FRONT_T)
+        self.assertGreater(float(patch[0, 2]), 0.3)
+
+        stretched = disparity_to_metric_depth(disparity)
+        old = camera_to_ego(
+            unproject_depth(stretched, intrinsic, stride=2),
+            self.FRONT_ROT,
+            self.FRONT_T,
+        )
+        old_span = old[(old[:, 0] > 5.0) & (old[:, 0] < 25.0) & (np.abs(old[:, 1]) < 6.0)]
+        self.assertGreater(old_span.shape[0], 10)
+        self.assertGreater(abs(float(np.median(old_span[:, 2]))), 0.5)
+
+    def test_low_camera_falls_back_to_bounded_stretch(self):
+        disparity = np.linspace(0.0, 4.0, 64, dtype=np.float32).reshape(8, 8)
+        intrinsic = np.eye(3)
+        depth = metric_depth_from_ground(
+            disparity,
+            intrinsic,
+            np.array([1.0, 0.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 0.1]),
+        )
+        np.testing.assert_allclose(depth, disparity_to_metric_depth(disparity))
 
 
 class UnprojectionTests(unittest.TestCase):
@@ -163,6 +232,25 @@ class VoxelizationTests(unittest.TestCase):
         self.assertAlmostEqual(grid_miou(cells, other, voxel_size=1.0), 0.0)
         empty = np.zeros((0, 3), dtype=np.float32)
         self.assertAlmostEqual(grid_miou(empty, empty, voxel_size=1.0), 1.0)
+
+    def test_one_cell_tolerance_counts_a_neighbor(self):
+        left = np.array([[0.1, 0.1, 0.1]], dtype=np.float32)
+        neighbor = np.array([[0.3, 0.1, 0.1]], dtype=np.float32)
+        far = np.array([[2.1, 0.1, 0.1]], dtype=np.float32)
+        self.assertAlmostEqual(grid_miou(left, neighbor, voxel_size=0.2), 0.0)
+        self.assertAlmostEqual(grid_miou(left, neighbor, voxel_size=0.2, tolerance=1), 1.0)
+        self.assertAlmostEqual(grid_miou(left, far, voxel_size=0.2, tolerance=1), 0.0)
+
+    def test_elevated_cells_survive_a_road_dominated_threshold(self):
+        road = np.tile(np.array([[2.0, 0.0, 0.1]], dtype=np.float64), (40, 1))
+        road += np.array([[0.02, 0.0, 0.0]])
+        car = np.array([[6.1, 1.0, 1.6], [6.1, 1.0, 1.6]], dtype=np.float64)
+        centers, _ = voxelize_occupancy(
+            np.vstack([road, car]),
+            voxel_size=0.2,
+            occupancy_threshold=0.9,
+        )
+        self.assertTrue(np.any(centers[:, 2] > 1.0))
 
 
 if __name__ == "__main__":
