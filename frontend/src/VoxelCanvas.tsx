@@ -1,5 +1,5 @@
-import React, { useRef, useMemo, type MutableRefObject } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useEffect, useRef, useMemo, type MutableRefObject } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import type { SemanticClass, SelectedVoxel, VoxelData } from './types';
@@ -32,8 +32,21 @@ interface VoxelCanvasProps {
 }
 
 const MAX_INSTANCES = 900;
+// A real click drifts a few pixels, and these cubes are only a handful of
+// pixels across. Treat that as a click on whatever the press hit. A longer
+// move is an orbit drag and should not open or close the inspector.
+const CLICK_SLOP_PX = 16;
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
+
+function hitInstanceId(event: {
+  instanceId?: number | null;
+  intersections: Array<{ instanceId?: number | null }>;
+}): number | null {
+  const id =
+    event.intersections.find((hit) => hit.instanceId != null)?.instanceId ?? event.instanceId;
+  return id == null ? null : id;
+}
 
 const CLASS_COLOR: Record<SemanticClass, string> = {
   driveable: '#7ee787',
@@ -55,9 +68,40 @@ const VoxelInstances: React.FC<{
   const selectedRef = useRef(selected);
   const lastVoxelsRef = useRef<VoxelData[] | null>(null);
   const lastSelectedRef = useRef<VoxelData | null>(null);
+  const pressRef = useRef<{ id: number; stamp: number } | null>(null);
+  const onSelectRef = useRef(onSelect);
+  const gl = useThree((state) => state.gl);
   layersRef.current = layers;
   sizeRef.current = voxelSize;
   selectedRef.current = selected;
+  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const down = { x: 0, y: 0, id: null as number | null };
+    const onDown = (event: PointerEvent) => {
+      const press = pressRef.current;
+      down.x = event.clientX;
+      down.y = event.clientY;
+      // The mesh handler runs in the capture phase and stamps this press.
+      down.id = press && press.stamp === event.timeStamp ? press.id : null;
+    };
+    const onUp = (event: PointerEvent) => {
+      const id = down.id;
+      down.id = null;
+      const dx = event.clientX - down.x;
+      const dy = event.clientY - down.y;
+      if (dx * dx + dy * dy > CLICK_SLOP_PX * CLICK_SLOP_PX) return;
+      if (id == null) onSelectRef.current(null);
+      else onSelectRef.current(visibleRef.current[id] ?? null);
+    };
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointerup', onUp);
+    return () => {
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointerup', onUp);
+    };
+  }, [gl]);
 
   useFrame(() => {
     const mesh = meshRef.current;
@@ -123,13 +167,14 @@ const VoxelInstances: React.FC<{
       ref={meshRef}
       args={[undefined, undefined, MAX_INSTANCES]}
       frustumCulled={false}
+      onPointerDown={(event) => {
+        const id = hitInstanceId(event);
+        if (id == null) return;
+        pressRef.current = { id, stamp: event.nativeEvent.timeStamp };
+      }}
       onClick={(event) => {
         event.stopPropagation();
-        // The native click event is spread on top of the hit and can wipe
-        // instanceId. The intersection list is copied before that spread.
-        const instanceId =
-          event.intersections.find((hit) => hit.instanceId != null)?.instanceId ??
-          event.instanceId;
+        const instanceId = hitInstanceId(event);
         if (instanceId == null) return;
         onSelect(visibleRef.current[instanceId] ?? null);
       }}
@@ -206,10 +251,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
         </h1>
       </div>
       <div className="voxel-stage">
-        <Canvas
-          camera={{ position: [12, 10, -22], fov: 50 }}
-          onPointerMissed={() => onSelect(null)}
-        >
+        <Canvas camera={{ position: [12, 10, -22], fov: 50 }}>
           <color attach="background" args={['#0d1117']} />
           <ambientLight intensity={0.8} />
 
