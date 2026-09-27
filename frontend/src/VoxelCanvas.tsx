@@ -54,6 +54,7 @@ const VoxelInstances: React.FC<{
   const sizeRef = useRef(voxelSize);
   const selectedRef = useRef(selected);
   const lastVoxelsRef = useRef<VoxelData[] | null>(null);
+  const lastSelectedRef = useRef<VoxelData | null>(null);
   layersRef.current = layers;
   sizeRef.current = voxelSize;
   selectedRef.current = selected;
@@ -61,26 +62,46 @@ const VoxelInstances: React.FC<{
   useFrame(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    if (voxelsRef.current === lastVoxelsRef.current) return;
-    lastVoxelsRef.current = voxelsRef.current;
 
-    const layersNow = layersRef.current;
-    const sizeNow = sizeRef.current;
+    const voxelsNow = voxelsRef.current;
     const selectedNow = selectedRef.current;
-    const visible = voxelsRef.current.filter((voxel) => layersNow[voxel.cls]);
-    visibleRef.current = visible;
+    const voxelsChanged = voxelsNow !== lastVoxelsRef.current;
+    const selectionChanged = selectedNow !== lastSelectedRef.current;
+    if (!voxelsChanged && !selectionChanged) return;
 
-    const count = Math.min(visible.length, MAX_INSTANCES);
-    mesh.count = count;
+    if (voxelsChanged) {
+      lastVoxelsRef.current = voxelsNow;
+      const layersNow = layersRef.current;
+      const sizeNow = sizeRef.current;
+      const visible = voxelsNow.filter((voxel) => layersNow[voxel.cls]);
+      visibleRef.current = visible;
 
-    for (let i = 0; i < count; i++) {
+      const count = Math.min(visible.length, MAX_INSTANCES);
+      mesh.count = count;
+
+      for (let i = 0; i < count; i++) {
+        const voxel = visible[i];
+        // nuScenes ego: x forward, y left, z up → Three.js: x right, y up, z forward
+        dummy.position.set(-voxel.y, voxel.z, voxel.x);
+        dummy.scale.setScalar(Math.max(sizeNow, 0.12) * 0.9);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+
+      mesh.instanceMatrix.needsUpdate = true;
+      // InstancedMesh.raycast drops the ray when it misses boundingSphere, and
+      // that sphere is filled on the first pointer event — often while every
+      // instance is still the identity matrix at the origin. Drawing ignores
+      // the sphere (frustumCulled is off), so the cubes stay visible while
+      // every click misses and the inspector never opens.
+      mesh.computeBoundingSphere();
+    }
+
+    lastSelectedRef.current = selectedNow;
+    const visible = visibleRef.current;
+    for (let i = 0; i < mesh.count; i++) {
       const voxel = visible[i];
-      // nuScenes ego: x forward, y left, z up → Three.js: x right, y up, z forward
-      dummy.position.set(-voxel.y, voxel.z, voxel.x);
-      dummy.scale.setScalar(Math.max(sizeNow, 0.12) * 0.9);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-
+      if (!voxel) continue;
       color.set(CLASS_COLOR[voxel.cls]);
       if (
         selectedNow &&
@@ -92,8 +113,6 @@ const VoxelInstances: React.FC<{
       }
       mesh.setColorAt(i, color);
     }
-
-    mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) {
       mesh.instanceColor.needsUpdate = true;
     }
@@ -106,8 +125,13 @@ const VoxelInstances: React.FC<{
       frustumCulled={false}
       onClick={(event) => {
         event.stopPropagation();
-        if (event.instanceId == null) return;
-        onSelect(visibleRef.current[event.instanceId] ?? null);
+        // The native click event is spread on top of the hit and can wipe
+        // instanceId. The intersection list is copied before that spread.
+        const instanceId =
+          event.intersections.find((hit) => hit.instanceId != null)?.instanceId ??
+          event.instanceId;
+        if (instanceId == null) return;
+        onSelect(visibleRef.current[instanceId] ?? null);
       }}
     >
       <boxGeometry args={[1, 1, 1]} />
@@ -198,7 +222,10 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             onSelect={onSelect}
           />
 
+          {/* The grid shader lays the plane flat, but raycasts still see the
+              upright quad, so it sat through the cloud and swallowed clicks. */}
           <Grid
+            raycast={() => null}
             position={[0, 0, 12]}
             args={[50, 50]}
             cellSize={1}
