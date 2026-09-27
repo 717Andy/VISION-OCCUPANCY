@@ -58,9 +58,12 @@ export const App: React.FC = () => {
   const [playing, setPlaying] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('single');
   const [miou, setMiou] = useState('—');
+  const [discrepancyOn, setDiscrepancyOn] = useState(false);
+  const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
 
   const predVoxelsRef = useRef<VoxelData[]>([]);
   const gtVoxelsRef = useRef<VoxelData[]>([]);
+  const errorVoxelsRef = useRef<VoxelData[]>([]);
   const orbitRef = useRef(createSharedOrbit());
   const wsRef = useRef<WebSocket | null>(null);
   const pendingFrameRef = useRef<ArrayBuffer | null>(null);
@@ -124,17 +127,21 @@ export const App: React.FC = () => {
     };
 
     const consumeFrame = (buffer: ArrayBuffer) => {
-      if (buffer.byteLength < 8) return;
-      const header = new Uint32Array(buffer, 0, 2);
+      if (buffer.byteLength < 12) return;
+      const header = new Uint32Array(buffer, 0, 3);
       const predCount = header[0];
       const gtCount = header[1];
+      const errCount = header[2];
       const predBytes = predCount * 16;
       const gtBytes = gtCount * 16;
-      if (buffer.byteLength < 8 + predBytes + gtBytes) return;
-      const predFloats = new Float32Array(buffer, 8, predCount * 4);
-      const gtFloats = new Float32Array(buffer, 8 + predBytes, gtCount * 4);
+      const errBytes = errCount * 16;
+      if (buffer.byteLength < 12 + predBytes + gtBytes + errBytes) return;
+      const predFloats = new Float32Array(buffer, 12, predCount * 4);
+      const gtFloats = new Float32Array(buffer, 12 + predBytes, gtCount * 4);
+      const errFloats = new Float32Array(buffer, 12 + predBytes + gtBytes, errCount * 4);
       predVoxelsRef.current = decodeVoxels(predFloats, predCount);
       gtVoxelsRef.current = decodeVoxels(gtFloats, gtCount);
+      errorVoxelsRef.current = decodeVoxels(errFloats, errCount);
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -289,6 +296,11 @@ export const App: React.FC = () => {
           onSelect={handleSelectVoxel}
           orbitRef={orbitRef}
           orbitId="pred"
+          discrepancyRef={errorVoxelsRef}
+          discrepancyEnabled={discrepancyOn}
+          discrepancyColor={discrepancyColor}
+          onDiscrepancyEnabledChange={setDiscrepancyOn}
+          onDiscrepancyColorChange={setDiscrepancyColor}
         />
         {settingsOpen && (
           <ControlPanel

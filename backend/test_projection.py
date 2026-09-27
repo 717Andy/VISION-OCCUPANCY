@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 from projection import (
+    EGO_BOUNDS,
     FAR_M,
     NEAR_M,
     camera_to_ego,
@@ -14,6 +15,7 @@ from projection import (
     grid_miou,
     gt_occupancy_threshold,
     metric_depth_from_ground,
+    discrepancy_voxels,
     pack_occupancy,
     pack_occupancy_pair,
     quat_to_rotmat,
@@ -189,15 +191,39 @@ class VoxelizationTests(unittest.TestCase):
         pred_o = np.array([0.9], dtype=np.float32)
         gt_c = np.array([[1.0, 2.0, 0.5], [3.0, 0.0, 1.0]], dtype=np.float32)
         gt_o = np.array([0.9, 0.4], dtype=np.float32)
-        payload = pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o)
-        pred_n, gt_n = np.frombuffer(payload[:8], dtype=np.uint32)
+        err_c = np.array([[3.0, 0.0, 1.0]], dtype=np.float32)
+        err_o = np.array([1.0], dtype=np.float32)
+        payload = pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, err_c, err_o)
+        pred_n, gt_n, err_n = np.frombuffer(payload[:12], dtype=np.uint32)
         self.assertEqual(int(pred_n), 1)
         self.assertEqual(int(gt_n), 2)
-        body = np.frombuffer(payload[8:], dtype=np.float32)
-        self.assertEqual(body.size, (1 + 2) * 4)
+        self.assertEqual(int(err_n), 1)
+        body = np.frombuffer(payload[12:], dtype=np.float32)
+        self.assertEqual(body.size, (1 + 2 + 1) * 4)
         np.testing.assert_allclose(body[:4], [1.0, 2.0, 0.5, 0.9])
         np.testing.assert_allclose(body[4:8], [1.0, 2.0, 0.5, 0.9])
-        np.testing.assert_allclose(body[8:], [3.0, 0.0, 1.0, 0.4])
+        np.testing.assert_allclose(body[8:12], [3.0, 0.0, 1.0, 0.4])
+        np.testing.assert_allclose(body[12:], [3.0, 0.0, 1.0, 1.0])
+
+    def test_discrepancy_is_the_per_cell_symmetric_difference(self):
+        origin = EGO_BOUNDS[:, 0]
+        size = 0.2
+
+        def center(ijk: tuple[int, int, int]) -> np.ndarray:
+            return origin + (np.array(ijk, dtype=np.float64) + 0.5) * size
+
+        shared = center((40, 20, 8))
+        pred_only = center((80, 20, 8))
+        gt_only = center((10, 40, 12))
+        pred = np.vstack([shared, pred_only]).astype(np.float32)
+        gt = np.vstack([shared, gt_only]).astype(np.float32)
+        centers, occ = discrepancy_voxels(pred, gt, size, origin=origin, cap=False)
+        got = {tuple(np.round(row, 4)) for row in centers.astype(np.float64)}
+        expected = {tuple(np.round(pred_only, 4)), tuple(np.round(gt_only, 4))}
+        self.assertEqual(got, expected)
+        self.assertTrue(np.all(occ == 1.0))
+        empty, _ = discrepancy_voxels(pred, pred, size, origin=origin, cap=False)
+        self.assertEqual(empty.shape[0], 0)
 
     def test_lidar_grid_is_not_a_camera_cloud(self):
         from projection import voxelize_lidar

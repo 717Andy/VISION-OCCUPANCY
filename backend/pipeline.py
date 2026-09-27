@@ -14,6 +14,8 @@ from lidar_gt import load_lidar_ego_points
 from midas_engine import MidasDepthEngine
 from nuscenes_loader import CAMERA_IDS, ClipNotPrepared, load_rgb, load_synchronized_frame
 from projection import (
+    EGO_BOUNDS,
+    discrepancy_voxels,
     grid_miou,
     pack_occupancy,
     pack_occupancy_pair,
@@ -80,7 +82,10 @@ class PerceptionPipeline:
         gt_centers, gt_occ = voxelize_lidar(points, voxel_size)
         self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size, tolerance=1)
         self.gt_source = "lidar-top" if gt_centers.shape[0] else "unavailable"
-        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ)
+        err_centers, err_occ = discrepancy_voxels(
+            pred_centers, gt_centers, voxel_size, origin=EGO_BOUNDS[:, 0]
+        )
+        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ)
 
     def generate_occupancy_pair(
         self,
@@ -164,7 +169,7 @@ class PerceptionPipeline:
             )
 
         start = time.perf_counter()
-        pred_c, pred_o, gt_c, gt_o, miou = project_cameras_to_voxel_pair(
+        pred_c, pred_o, gt_c, gt_o, err_c, err_o, miou = project_cameras_to_voxel_pair(
             payloads,
             load_lidar_ego_points(frame_index),
             voxel_size,
@@ -174,7 +179,7 @@ class PerceptionPipeline:
         self.last_depth_ms = depth_ms
         self.last_miou = miou
         self.gt_source = "lidar-top" if gt_c.shape[0] else "unavailable"
-        return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o)
+        return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, err_c, err_o)
 
     def warmup(self) -> None:
         """Load MiDaS, touch Open3D, and cache depth for frame 0."""

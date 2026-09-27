@@ -18,6 +18,8 @@ export function createSharedOrbit(): SharedOrbit {
   };
 }
 
+type PressClaim = { voxel: VoxelData; stamp: number };
+
 interface VoxelCanvasProps {
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
@@ -29,6 +31,11 @@ interface VoxelCanvasProps {
   className?: string;
   orbitRef?: MutableRefObject<SharedOrbit>;
   orbitId?: string;
+  discrepancyRef?: MutableRefObject<VoxelData[]>;
+  discrepancyEnabled?: boolean;
+  discrepancyColor?: string;
+  onDiscrepancyEnabledChange?: (enabled: boolean) => void;
+  onDiscrepancyColorChange?: (color: string) => void;
 }
 
 const MAX_INSTANCES = 900;
@@ -54,46 +61,31 @@ const CLASS_COLOR: Record<SemanticClass, string> = {
   pedestrian: '#f85149',
 };
 
-const VoxelInstances: React.FC<{
-  voxelsRef: MutableRefObject<VoxelData[]>;
-  voxelSize: number;
-  layers: Record<SemanticClass, boolean>;
-  selected: VoxelData | null;
+const PickGesture: React.FC<{
+  claimRef: MutableRefObject<PressClaim | null>;
   onSelect: (voxel: VoxelData | null) => void;
-}> = ({ voxelsRef, voxelSize, layers, selected, onSelect }) => {
-  const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const visibleRef = useRef<VoxelData[]>([]);
-  const layersRef = useRef(layers);
-  const sizeRef = useRef(voxelSize);
-  const selectedRef = useRef(selected);
-  const lastVoxelsRef = useRef<VoxelData[] | null>(null);
-  const lastSelectedRef = useRef<VoxelData | null>(null);
-  const pressRef = useRef<{ id: number; stamp: number } | null>(null);
-  const onSelectRef = useRef(onSelect);
+}> = ({ claimRef, onSelect }) => {
   const gl = useThree((state) => state.gl);
-  layersRef.current = layers;
-  sizeRef.current = voxelSize;
-  selectedRef.current = selected;
+  const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
   useEffect(() => {
     const canvas = gl.domElement;
-    const down = { x: 0, y: 0, id: null as number | null };
+    const down = { x: 0, y: 0, voxel: null as VoxelData | null };
     const onDown = (event: PointerEvent) => {
-      const press = pressRef.current;
+      const claim = claimRef.current;
       down.x = event.clientX;
       down.y = event.clientY;
-      // The mesh handler runs in the capture phase and stamps this press.
-      down.id = press && press.stamp === event.timeStamp ? press.id : null;
+      // Mesh handlers run in the capture phase and stamp this press.
+      down.voxel = claim && claim.stamp === event.timeStamp ? claim.voxel : null;
     };
     const onUp = (event: PointerEvent) => {
-      const id = down.id;
-      down.id = null;
+      const voxel = down.voxel;
+      down.voxel = null;
       const dx = event.clientX - down.x;
       const dy = event.clientY - down.y;
       if (dx * dx + dy * dy > CLICK_SLOP_PX * CLICK_SLOP_PX) return;
-      if (id == null) onSelectRef.current(null);
-      else onSelectRef.current(visibleRef.current[id] ?? null);
+      onSelectRef.current(voxel);
     };
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointerup', onUp);
@@ -101,7 +93,29 @@ const VoxelInstances: React.FC<{
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointerup', onUp);
     };
-  }, [gl]);
+  }, [claimRef, gl]);
+
+  return null;
+};
+
+const VoxelInstances: React.FC<{
+  voxelsRef: MutableRefObject<VoxelData[]>;
+  voxelSize: number;
+  layers: Record<SemanticClass, boolean>;
+  selected: VoxelData | null;
+  onSelect: (voxel: VoxelData | null) => void;
+  claimRef: MutableRefObject<PressClaim | null>;
+}> = ({ voxelsRef, voxelSize, layers, selected, onSelect, claimRef }) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const visibleRef = useRef<VoxelData[]>([]);
+  const layersRef = useRef(layers);
+  const sizeRef = useRef(voxelSize);
+  const selectedRef = useRef(selected);
+  const lastVoxelsRef = useRef<VoxelData[] | null>(null);
+  const lastSelectedRef = useRef<VoxelData | null>(null);
+  layersRef.current = layers;
+  sizeRef.current = voxelSize;
+  selectedRef.current = selected;
 
   useFrame(() => {
     const mesh = meshRef.current;
@@ -169,8 +183,117 @@ const VoxelInstances: React.FC<{
       frustumCulled={false}
       onPointerDown={(event) => {
         const id = hitInstanceId(event);
-        if (id == null) return;
-        pressRef.current = { id, stamp: event.nativeEvent.timeStamp };
+        const voxel = id == null ? null : visibleRef.current[id];
+        if (!voxel) return;
+        claimRef.current = { voxel, stamp: event.nativeEvent.timeStamp };
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        const instanceId = hitInstanceId(event);
+        if (instanceId == null) return;
+        onSelect(visibleRef.current[instanceId] ?? null);
+      }}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial toneMapped={false} />
+    </instancedMesh>
+  );
+};
+
+const DiscrepancyOverlay: React.FC<{
+  voxelsRef: MutableRefObject<VoxelData[]>;
+  voxelSize: number;
+  enabled: boolean;
+  colorHex: string;
+  selected: VoxelData | null;
+  claimRef: MutableRefObject<PressClaim | null>;
+  onSelect: (voxel: VoxelData | null) => void;
+}> = ({ voxelsRef, voxelSize, enabled, colorHex, selected, claimRef, onSelect }) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const visibleRef = useRef<VoxelData[]>([]);
+  const sizeRef = useRef(voxelSize);
+  const enabledRef = useRef(enabled);
+  const colorRef = useRef(colorHex);
+  const selectedRef = useRef(selected);
+  const lastVoxelsRef = useRef<VoxelData[] | null>(null);
+  const lastEnabledRef = useRef(enabled);
+  const lastColorRef = useRef(colorHex);
+  const lastSelectedRef = useRef<VoxelData | null>(null);
+  sizeRef.current = voxelSize;
+  enabledRef.current = enabled;
+  colorRef.current = colorHex;
+  selectedRef.current = selected;
+
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const voxelsNow = voxelsRef.current;
+    const enabledNow = enabledRef.current;
+    const colorNow = colorRef.current;
+    const selectedNow = selectedRef.current;
+    const voxelsChanged = voxelsNow !== lastVoxelsRef.current;
+    const enabledChanged = enabledNow !== lastEnabledRef.current;
+    const colorChanged = colorNow !== lastColorRef.current;
+    const selectionChanged = selectedNow !== lastSelectedRef.current;
+    if (!voxelsChanged && !enabledChanged && !colorChanged && !selectionChanged) return;
+
+    lastEnabledRef.current = enabledNow;
+    lastColorRef.current = colorNow;
+    lastSelectedRef.current = selectedNow;
+    if (!enabledNow) {
+      mesh.count = 0;
+      visibleRef.current = [];
+      lastVoxelsRef.current = voxelsNow;
+      return;
+    }
+
+    if (voxelsChanged || enabledChanged) {
+      lastVoxelsRef.current = voxelsNow;
+      const visible = voxelsNow;
+      visibleRef.current = visible;
+      const count = Math.min(visible.length, MAX_INSTANCES);
+      mesh.count = count;
+      const scale = Math.max(sizeRef.current, 0.12) * 1.02;
+      for (let i = 0; i < count; i++) {
+        const voxel = visible[i];
+        dummy.position.set(-voxel.y, voxel.z, voxel.x);
+        dummy.scale.setScalar(scale);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    }
+
+    const visible = visibleRef.current;
+    color.set(colorNow);
+    for (let i = 0; i < mesh.count; i++) {
+      const voxel = visible[i];
+      if (!voxel) continue;
+      color.set(colorNow);
+      if (
+        selectedNow &&
+        selectedNow.x === voxel.x &&
+        selectedNow.y === voxel.y &&
+        selectedNow.z === voxel.z
+      ) {
+        color.offsetHSL(0, 0, 0.18);
+      }
+      mesh.setColorAt(i, color);
+    }
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, MAX_INSTANCES]}
+      frustumCulled={false}
+      onPointerDown={(event) => {
+        const id = hitInstanceId(event);
+        const voxel = id == null ? null : visibleRef.current[id];
+        if (!voxel) return;
+        claimRef.current = { voxel, stamp: event.nativeEvent.timeStamp };
       }}
       onClick={(event) => {
         event.stopPropagation();
@@ -236,24 +359,53 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   className = 'pane',
   orbitRef,
   orbitId,
+  discrepancyRef,
+  discrepancyEnabled = false,
+  discrepancyColor = '#f0883e',
+  onDiscrepancyEnabledChange,
+  onDiscrepancyColorChange,
 }) => {
+  const claimRef = useRef<PressClaim | null>(null);
   const layerKey = useMemo(
     () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}-${voxelSize}`,
     [layers, voxelSize],
   );
+  const showDiscrepancy = Boolean(discrepancyRef && onDiscrepancyEnabledChange);
 
   return (
     <section className={className}>
-      <div className="pane-header">
+      <div className="pane-header voxel-header">
         <h1 className="pane-title">
           {title}
           <span className="sub">{subtitle}</span>
         </h1>
+        {showDiscrepancy && (
+          <div className="discrepancy-controls">
+            <button
+              type="button"
+              className="discrepancy-btn"
+              aria-pressed={discrepancyEnabled}
+              style={discrepancyEnabled ? { borderColor: discrepancyColor } : undefined}
+              onClick={() => onDiscrepancyEnabledChange?.(!discrepancyEnabled)}
+            >
+              Discrepancy
+            </button>
+            <input
+              type="color"
+              className="discrepancy-color"
+              aria-label="Discrepancy color"
+              value={discrepancyColor}
+              onChange={(event) => onDiscrepancyColorChange?.(event.target.value)}
+            />
+          </div>
+        )}
       </div>
       <div className="voxel-stage">
         <Canvas camera={{ position: [12, 10, -22], fov: 50 }}>
           <color attach="background" args={['#0d1117']} />
           <ambientLight intensity={0.8} />
+
+          <PickGesture claimRef={claimRef} onSelect={onSelect} />
 
           <VoxelInstances
             key={layerKey}
@@ -262,7 +414,20 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             layers={layers}
             selected={selected?.voxel ?? null}
             onSelect={onSelect}
+            claimRef={claimRef}
           />
+
+          {discrepancyRef && (
+            <DiscrepancyOverlay
+              voxelsRef={discrepancyRef}
+              voxelSize={voxelSize}
+              enabled={discrepancyEnabled}
+              colorHex={discrepancyColor}
+              selected={selected?.voxel ?? null}
+              claimRef={claimRef}
+              onSelect={onSelect}
+            />
+          )}
 
           {/* The grid shader lays the plane flat, but raycasts still see the
               upright quad, so it sat through the cloud and swallowed clicks. */}
