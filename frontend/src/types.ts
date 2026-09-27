@@ -49,6 +49,48 @@ export interface ControlsState {
   layers: Record<SemanticClass, boolean>;
 }
 
+export interface BenchmarkClassCount {
+  class: string;
+  tp: number;
+  fp: number;
+  fn: number;
+  iou: number;
+}
+
+export interface BenchmarkRow {
+  pipeline: string;
+  tp: number;
+  fp: number;
+  fn: number;
+  iou: number;
+  miou: number;
+  classes?: BenchmarkClassCount[];
+}
+
+export interface BenchmarkScore {
+  tp: number;
+  fp: number;
+  fn: number;
+  iou: number;
+  miou: number;
+}
+
+export interface BenchmarkTable {
+  voxel_m: number;
+  frame_index: number;
+  split: string;
+  monocular_threshold: number;
+  voxnet_threshold: number;
+  scoring?: string;
+  rows: BenchmarkRow[];
+  heldout?: {
+    frames: number;
+    monocular_threshold: number;
+    monocular?: BenchmarkScore;
+    voxnet?: BenchmarkScore;
+  } | null;
+}
+
 export interface SelectedVoxel {
   voxel: VoxelData;
   meters: { x: number; y: number; z: number };
