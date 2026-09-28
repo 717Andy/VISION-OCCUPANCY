@@ -475,6 +475,88 @@ def grid_miou(
     return float(true_positive / denom)
 
 
+# Height bands match the viewer: z < 0.45 driveable, z < 2.3 vehicle, else pedestrian.
+SEMANTIC_CLASSES = ("driveable", "vehicle", "pedestrian")
+
+
+def semantic_class_for_z(z: float) -> str:
+    if z < 0.45:
+        return "driveable"
+    if z < 2.3:
+        return "vehicle"
+    return "pedestrian"
+
+
+def _cell_keys(
+    centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray,
+) -> set[tuple[int, int, int]]:
+    pts = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
+    if pts.size == 0:
+        return set()
+    idx = np.floor((pts - origin) / voxel_size).astype(np.int64)
+    return {tuple(int(v) for v in row) for row in idx.tolist()}
+
+
+def occupancy_counts(
+    pred_centers: np.ndarray,
+    gt_centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Exact-cell occupancy counts against a ground-truth grid.
+
+    IoU = TP / (TP + FP + FN), with TP the cells both grids occupy, FP the
+    predicted cells that are empty in ground truth, and FN the ground-truth
+    cells the prediction missed. mIoU is the unweighted mean of that IoU over
+    the driveable, vehicle, and pedestrian height bands that contain any cell.
+    """
+    size = float(max(voxel_size, 0.05))
+    origin_vec = np.zeros(3, dtype=np.float64) if origin is None else np.asarray(origin, dtype=np.float64)
+    pred_keys = _cell_keys(pred_centers, size, origin_vec)
+    gt_keys = _cell_keys(gt_centers, size, origin_vec)
+    true_positive = len(pred_keys & gt_keys)
+    false_positive = len(pred_keys - gt_keys)
+    false_negative = len(gt_keys - pred_keys)
+    binary = _iou_from_counts(true_positive, false_positive, false_negative)
+
+    per_class: list[dict[str, Any]] = []
+    class_ious: list[float] = []
+    for name in SEMANTIC_CLASSES:
+        pred_band = {key for key in pred_keys if _class_of_key(key, origin_vec, size) == name}
+        gt_band = {key for key in gt_keys if _class_of_key(key, origin_vec, size) == name}
+        tp = len(pred_band & gt_band)
+        fp = len(pred_band - gt_band)
+        fn = len(gt_band - pred_band)
+        if tp + fp + fn == 0:
+            continue
+        iou = _iou_from_counts(tp, fp, fn)
+        class_ious.append(iou)
+        per_class.append({"class": name, "tp": tp, "fp": fp, "fn": fn, "iou": iou})
+
+    return {
+        "tp": true_positive,
+        "fp": false_positive,
+        "fn": false_negative,
+        "iou": binary,
+        "miou": float(sum(class_ious) / len(class_ious)) if class_ious else binary,
+        "classes": per_class,
+    }
+
+
+def _class_of_key(key: tuple[int, int, int], origin: np.ndarray, voxel_size: float) -> str:
+    z = float(origin[2] + (key[2] + 0.5) * voxel_size)
+    return semantic_class_for_z(z)
+
+
+def _iou_from_counts(tp: int, fp: int, fn: int) -> float:
+    denom = tp + fp + fn
+    if denom == 0:
+        return 1.0
+    return float(tp / denom)
+
+
 def gt_occupancy_threshold(occupancy_threshold: float) -> float:
     """Keep-threshold for the denser ground-truth pane."""
     return max(float(occupancy_threshold) * GT_OCCUPANCY_SCALE, GT_OCCUPANCY_FLOOR)

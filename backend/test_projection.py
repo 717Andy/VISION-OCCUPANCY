@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 from projection import (
+    occupancy_counts,
     EGO_BOUNDS,
     FAR_M,
     NEAR_M,
@@ -14,6 +15,7 @@ from projection import (
     disparity_to_metric_depth,
     grid_miou,
     gt_occupancy_threshold,
+    occupancy_counts,
     metric_depth_from_ground,
     discrepancy_voxels,
     pack_occupancy,
@@ -258,6 +260,37 @@ class VoxelizationTests(unittest.TestCase):
         self.assertAlmostEqual(grid_miou(cells, other, voxel_size=1.0), 0.0)
         empty = np.zeros((0, 3), dtype=np.float32)
         self.assertAlmostEqual(grid_miou(empty, empty, voxel_size=1.0), 1.0)
+
+    def test_occupancy_counts_report_tp_fp_fn_and_band_miou(self):
+        pred = np.array(
+            [
+                [0.5, 0.5, -0.5],
+                [1.5, 0.5, 1.5],
+            ],
+            dtype=np.float32,
+        )
+        gt = np.array(
+            [
+                [0.5, 0.5, -0.5],
+                [2.5, 0.5, 3.5],
+            ],
+            dtype=np.float32,
+        )
+        counts = occupancy_counts(pred, gt, voxel_size=1.0, origin=np.zeros(3))
+        self.assertEqual(counts["tp"], 1)
+        self.assertEqual(counts["fp"], 1)
+        self.assertEqual(counts["fn"], 1)
+        self.assertAlmostEqual(counts["iou"], 1.0 / 3.0)
+        by_class = {row["class"]: row for row in counts["classes"]}
+        self.assertAlmostEqual(by_class["driveable"]["iou"], 1.0)
+        self.assertEqual(by_class["vehicle"]["fp"], 1)
+        self.assertEqual(by_class["pedestrian"]["fn"], 1)
+        self.assertAlmostEqual(counts["miou"], 1.0 / 3.0)
+        empty = np.zeros((0, 3), dtype=np.float32)
+        both_empty = occupancy_counts(empty, empty, voxel_size=1.0)
+        self.assertEqual(both_empty["tp"], 0)
+        self.assertAlmostEqual(both_empty["iou"], 1.0)
+        self.assertAlmostEqual(both_empty["miou"], 1.0)
 
     def test_one_cell_tolerance_counts_a_neighbor(self):
         left = np.array([[0.1, 0.1, 0.1]], dtype=np.float32)

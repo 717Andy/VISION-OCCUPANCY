@@ -5,8 +5,10 @@ import { CameraFeed } from './CameraFeed';
 import { PlaybackBar } from './PlaybackBar';
 import { TopBar } from './TopBar';
 import { InspectionPanel } from './InspectionPanel';
+import { BenchmarkTable } from './BenchmarkTable';
 import { fetchGpuLabel, fetchManifest, wsUrl } from './api';
 import type {
+  BenchmarkTable as BenchmarkTableData,
   ControlsState,
   SceneManifest,
   SelectedVoxel,
@@ -60,6 +62,7 @@ export const App: React.FC = () => {
   const [miou, setMiou] = useState('—');
   const [discrepancyOn, setDiscrepancyOn] = useState(false);
   const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
+  const [benchmark, setBenchmark] = useState<BenchmarkTableData | null>(null);
 
   const predVoxelsRef = useRef<VoxelData[]>([]);
   const gtVoxelsRef = useRef<VoxelData[]>([]);
@@ -155,6 +158,7 @@ export const App: React.FC = () => {
             device?: string;
             voxel_source?: string;
             miou?: number;
+            benchmark?: BenchmarkTableData | null;
           };
           if (msg.type === 'occupancy_meta') {
             const elapsed =
@@ -166,6 +170,9 @@ export const App: React.FC = () => {
             }
             if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
               setMiou(msg.miou.toFixed(2));
+            }
+            if ('benchmark' in msg) {
+              setBenchmark(msg.benchmark ?? null);
             }
           }
         } catch {
@@ -312,6 +319,7 @@ export const App: React.FC = () => {
         {selected && !settingsOpen && (
           <InspectionPanel selected={selected} onClose={() => setSelected(null)} />
         )}
+        <BenchmarkTable table={benchmark} />
       </div>
 
       <PlaybackBar

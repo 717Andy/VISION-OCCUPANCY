@@ -38,10 +38,12 @@ class PerceptionPipeline:
         self.last_project_ms = 0.0
         self.last_miou = 0.0
         self.last_frame_index = 0
+        self.last_benchmark: dict[str, Any] | None = None
         self.voxel_source = "trigonometric-wave"
         self.gt_source = "unavailable"
         self.engine = depth_engine if depth_engine is not None else MidasDepthEngine()
         self._occupancy_cache: OrderedDict[tuple[int, float, float], tuple[bytes, float]] = OrderedDict()
+        self._benchmark_cache: OrderedDict[tuple[int, float], dict[str, Any]] = OrderedDict()
         self._cache_lock = threading.Lock()
 
         x = np.arange(GRID_X, dtype=np.float32)
@@ -119,7 +121,11 @@ class PerceptionPipeline:
                 self.last_depth_ms = 0.0
                 self.last_project_ms = 0.0
                 self.last_miou = miou
-                return payload
+            else:
+                payload = None
+        if payload is not None:
+            self._refresh_benchmark(int(frame_index), float(threshold))
+            return payload
 
         if not self.engine.ensure_loaded():
             self.voxel_source = "trigonometric-wave"
@@ -142,6 +148,7 @@ class PerceptionPipeline:
                     threshold=threshold, frame_index=frame_index, voxel_size=voxel_size
                 )
 
+        self._refresh_benchmark(int(frame_index), float(threshold))
         with self._cache_lock:
             self._occupancy_cache[key] = (payload, float(self.last_miou))
             self._occupancy_cache.move_to_end(key)
@@ -149,6 +156,30 @@ class PerceptionPipeline:
                 self._occupancy_cache.popitem(last=False)
         self.last_frame_index = int(frame_index)
         return payload
+
+    def _refresh_benchmark(self, frame_index: int, threshold: float) -> None:
+        """Attach the 1.0 m monocular-vs-VoxNet table without changing HUD mIoU."""
+        key = (int(frame_index), round(float(threshold), 3))
+        with self._cache_lock:
+            cached = self._benchmark_cache.get(key)
+            if cached is not None:
+                self._benchmark_cache.move_to_end(key)
+                self.last_benchmark = cached
+                return
+        try:
+            from benchmark import build_frame_benchmark
+
+            table = build_frame_benchmark(int(frame_index), float(threshold))
+        except Exception as exc:
+            logger.warning("Occupancy benchmark unavailable for frame %s: %s", frame_index, exc)
+            self.last_benchmark = None
+            return
+        with self._cache_lock:
+            self._benchmark_cache[key] = table
+            self._benchmark_cache.move_to_end(key)
+            while len(self._benchmark_cache) > OCCUPANCY_CACHE_LIMIT:
+                self._benchmark_cache.popitem(last=False)
+            self.last_benchmark = table
 
     def _midas_occupancy(self, frame_index: int, voxel_size: float, threshold: float) -> bytes:
         synced = load_synchronized_frame(frame_index)
