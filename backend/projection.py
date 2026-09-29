@@ -234,6 +234,64 @@ def camera_to_ego(points_cam: np.ndarray, rotation_wxyz: np.ndarray, translation
     return (rot @ pts.T).T + trans
 
 
+# Angular bin for the camera z-buffer. Eight native pixels is about one
+# occupancy cell across the nuScenes depth range.
+VISIBLE_PIXEL_BIN = 8
+VISIBLE_SURFACE_M = 0.4
+VISIBLE_MIN_DEPTH_M = 0.5
+
+
+def camera_visible_points(
+    points_ego: np.ndarray,
+    cameras: list[dict[str, Any]],
+    image_size: tuple[int, int] = ORIGINAL_IMAGE_SIZE,
+    pixel_bin: int = VISIBLE_PIXEL_BIN,
+    surface_m: float = VISIBLE_SURFACE_M,
+) -> np.ndarray:
+    """Keep lidar returns that are the first surface in the camera images.
+
+    Each camera keeps points that land inside its image and sit within
+    `surface_m` of the nearest return in that angular bin. Returns outside
+    every frame, behind the cameras, or hidden behind a closer surface are
+    dropped. The result is the lidar measurement of the space the feeds see.
+    """
+    pts = np.asarray(points_ego, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] == 0 or not cameras:
+        return pts.astype(np.float32, copy=False)
+
+    width, height = int(image_size[0]), int(image_size[1])
+    bin_size = max(int(pixel_bin), 1)
+    grid_w = (width + bin_size - 1) // bin_size
+    grid_h = (height + bin_size - 1) // bin_size
+    visible = np.zeros(pts.shape[0], dtype=bool)
+    thickness = float(max(surface_m, 0.0))
+
+    for camera in cameras:
+        intrinsic = np.asarray(camera["intrinsic"], dtype=np.float64).reshape(3, 3)
+        rotation = quat_to_rotmat(np.asarray(camera["rotation"], dtype=np.float64))
+        translation = np.asarray(camera["translation"], dtype=np.float64).reshape(1, 3)
+        cam = (pts - translation) @ rotation
+        depth = cam[:, 2]
+        in_front = depth > VISIBLE_MIN_DEPTH_M
+        if not np.any(in_front):
+            continue
+        pix = cam @ intrinsic.T
+        u = np.divide(pix[:, 0], depth, out=np.full(depth.shape, -1.0), where=in_front)
+        v = np.divide(pix[:, 1], depth, out=np.full(depth.shape, -1.0), where=in_front)
+        inside = in_front & (u >= 0.0) & (v >= 0.0) & (u < width) & (v < height)
+        if not np.any(inside):
+            continue
+        ui = np.minimum((u[inside] / bin_size).astype(np.int64), grid_w - 1)
+        vi = np.minimum((v[inside] / bin_size).astype(np.int64), grid_h - 1)
+        flat = vi * grid_w + ui
+        zbuf = np.full(grid_h * grid_w, np.inf, dtype=np.float64)
+        np.minimum.at(zbuf, flat, depth[inside])
+        on_surface = depth[inside] <= zbuf[flat] + thickness
+        visible[np.flatnonzero(inside)[on_surface]] = True
+
+    return pts[visible].astype(np.float32)
+
+
 def clip_to_bounds(points: np.ndarray, bounds: np.ndarray = EGO_BOUNDS) -> np.ndarray:
     pts = np.asarray(points, dtype=np.float64)
     if pts.size == 0:
@@ -685,7 +743,8 @@ def project_cameras_to_voxel_pair(
         origin=origin,
         cap=False,
     )
-    gt_centers, gt_occ = voxelize_lidar(lidar_points, voxel_size, cap=False)
+    visible_lidar = camera_visible_points(lidar_points, camera_payloads)
+    gt_centers, gt_occ = voxelize_lidar(visible_lidar, voxel_size, cap=False)
     # One cell of slack: the lidar shell and the depth sheet share a surface
     # but rarely the identical 0.2 m bin.
     miou = grid_miou(pred_centers, gt_centers, voxel_size, origin=origin, tolerance=1)

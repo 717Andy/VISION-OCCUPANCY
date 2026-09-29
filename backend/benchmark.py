@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from lidar_gt import load_lidar_ego_points
+from lidar_gt import camera_space_lidar
 from midas_engine import DEPTH_CACHE_ROOT
 from nuscenes_loader import CAMERA_IDS, load_synchronized_frame
 from projection import (
@@ -27,7 +27,7 @@ from voxnet_baseline import BENCH_VOXEL_M, held_out, load_baseline, predict_cent
 MONOCULAR_NAME = "Monocular depth"
 VOXNET_NAME = "VoxNet 3D CNN"
 SCORING = (
-    "exact 1.0 m cells; IoU = TP / (TP + FP + FN); "
+    "exact 1.0 m cells on camera-visible lidar; IoU = TP / (TP + FP + FN); "
     "mIoU = unweighted mean over driveable, vehicle, and pedestrian height bands"
 )
 
@@ -62,7 +62,7 @@ def monocular_centers(frame_index: int, threshold: float) -> np.ndarray:
 
 def gt_centers_for_frame(frame_index: int) -> np.ndarray:
     centers, _occupancy = voxelize_lidar(
-        load_lidar_ego_points(frame_index),
+        camera_space_lidar(frame_index),
         BENCH_VOXEL_M,
         cap=False,
     )

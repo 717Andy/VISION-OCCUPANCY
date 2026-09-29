@@ -54,9 +54,9 @@ export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({
         </tbody>
       </table>
       <p className="bench-note">
-        IoU = TP / (TP + FP + FN) on exact {table.voxel_m.toFixed(1)} m cells. mIoU averages the
-        driveable, vehicle, and pedestrian height bands. HUD mIoU stays the live 0.2 m score with
-        one-cell tolerance.
+        IoU = TP / (TP + FP + FN) on exact {table.voxel_m.toFixed(1)} m cells. Ground truth is the
+        lidar surface each camera can see. mIoU averages the driveable, vehicle, and pedestrian
+        height bands. HUD mIoU stays the live 0.2 m score with one-cell tolerance.
       </p>
       {held && heldLine && (
         <p className="bench-note">
