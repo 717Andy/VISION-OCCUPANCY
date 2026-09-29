@@ -17,6 +17,7 @@ from projection import (
     occupancy_counts,
     metric_depth_from_ground,
     camera_visible_points,
+    complete_camera_surface,
     discrepancy_voxels,
     pack_occupancy,
     pack_occupancy_pair,
@@ -304,15 +305,87 @@ class VoxelizationTests(unittest.TestCase):
         self.assertFalse(contains(outside))
 
     def test_real_sweep_drops_lidar_the_cameras_cannot_see(self):
-        from lidar_gt import camera_space_lidar, load_lidar_ego_points
+        from lidar_gt import load_lidar_ego_points
+        from nuscenes_loader import CAMERA_IDS, load_synchronized_frame
 
         full = load_lidar_ego_points(0)
-        visible = camera_space_lidar(0)
+        frame = load_synchronized_frame(0)
+        cameras = [
+            {
+                "intrinsic": frame.cameras[camera_id].intrinsic,
+                "rotation": frame.cameras[camera_id].rotation,
+                "translation": frame.cameras[camera_id].translation,
+            }
+            for camera_id in CAMERA_IDS
+        ]
+        visible = camera_visible_points(full, cameras)
         self.assertGreater(full.shape[0], 1000)
         self.assertLess(visible.shape[0], full.shape[0])
         self.assertGreater(visible.shape[0], int(full.shape[0] * 0.5))
         # The near-ego ring is mostly below the images. The feeds keep the farther road.
         self.assertGreater(float(np.median(np.linalg.norm(visible[:, :2], axis=1))), 5.0)
+
+    def test_agreed_camera_gap_is_filled_on_the_near_surface(self):
+        rotation = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        camera = {
+            "intrinsic": np.array([[80.0, 0.0, 48.0], [0.0, 80.0, 48.0], [0.0, 0.0, 1.0]]),
+            "rotation": _quat_wxyz(rotation),
+            "translation": np.zeros(3),
+        }
+        # Two hits on the same surface with one depth bin between them, plus a
+        # farther return on the first ray that the near hit must hide.
+        left = np.array([10.0, 1.5, 0.0])
+        right = np.array([10.0, -0.5, 0.0])
+        hidden = np.array([20.0, 3.0, 0.0])
+        surface = complete_camera_surface(
+            np.vstack([left, right, hidden]),
+            [camera],
+            image_size=(96, 96),
+            pixel_bin=8,
+            fill_radius=1,
+            agree_m=0.5,
+            min_support=1,
+        )
+        self.assertGreater(surface.shape[0], 2)
+        between = (
+            (np.abs(surface[:, 0] - 10.0) < 0.4)
+            & (np.abs(surface[:, 1] - 0.5) < 0.4)
+            & (np.abs(surface[:, 2] + 0.5) < 0.4)
+        )
+        self.assertTrue(np.any(between))
+        self.assertFalse(np.any(surface[:, 0] > 15.0))
+
+    def test_frame_surface_adds_points_without_leaving_the_measurements(self):
+        from lidar_gt import camera_space_lidar, load_lidar_ego_points
+        from nuscenes_loader import CAMERA_IDS, load_synchronized_frame
+        from projection import voxelize_lidar
+
+        full = load_lidar_ego_points(0)
+        frame = load_synchronized_frame(0)
+        cameras = [
+            {
+                "intrinsic": frame.cameras[camera_id].intrinsic,
+                "rotation": frame.cameras[camera_id].rotation,
+                "translation": frame.cameras[camera_id].translation,
+            }
+            for camera_id in CAMERA_IDS
+        ]
+        visible = camera_visible_points(full, cameras)
+        space = camera_space_lidar(0)
+        visible_cells, _ = voxelize_lidar(visible, 0.2, cap=False)
+        space_cells, _ = voxelize_lidar(space, 0.2, cap=False)
+        self.assertGreater(space_cells.shape[0], visible_cells.shape[0])
+        sample = space[np.random.default_rng(0).choice(space.shape[0], size=200, replace=False)]
+        distances = [float(np.linalg.norm(visible - point, axis=1).min()) for point in sample]
+        self.assertLess(float(np.median(distances)), 0.5)
+        self.assertLess(float(np.percentile(distances, 95)), 1.0)
 
     def test_lidar_grid_is_not_a_camera_cloud(self):
         from projection import voxelize_lidar

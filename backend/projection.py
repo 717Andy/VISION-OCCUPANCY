@@ -33,7 +33,7 @@ EGO_BOUNDS = np.array(
 )
 
 MAX_POINTS = 80_000
-MAX_VOXELS = 4_000
+MAX_VOXELS = 12_000
 # Dense "sensor" occupancy for Split GT (same fused cloud, lower keep-threshold).
 GT_OCCUPANCY_SCALE = 0.55
 GT_OCCUPANCY_FLOOR = 0.05
@@ -290,6 +290,119 @@ def camera_visible_points(
         visible[np.flatnonzero(inside)[on_surface]] = True
 
     return pts[visible].astype(np.float32)
+
+
+def _fill_agreed_depth(
+    depth: np.ndarray,
+    radius: int,
+    agree_m: float,
+    min_support: int,
+) -> np.ndarray:
+    """Fill empty depth bins whose nearby measured depths lie on one surface."""
+    finite = np.isfinite(depth)
+    values = np.where(finite, depth, 0.0)
+    total = np.zeros(depth.shape, dtype=np.float64)
+    count = np.zeros(depth.shape, dtype=np.int16)
+    nearest = np.full(depth.shape, np.inf, dtype=np.float64)
+    farthest = np.full(depth.shape, -np.inf, dtype=np.float64)
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            if dx == 0 and dy == 0:
+                continue
+            rolled_values = np.roll(np.roll(values, dy, axis=0), dx, axis=1)
+            rolled_known = np.roll(np.roll(finite, dy, axis=0), dx, axis=1)
+            if dy > 0:
+                rolled_known[:dy, :] = False
+            elif dy < 0:
+                rolled_known[dy:, :] = False
+            if dx > 0:
+                rolled_known[:, :dx] = False
+            elif dx < 0:
+                rolled_known[:, dx:] = False
+            total += np.where(rolled_known, rolled_values, 0.0)
+            count += rolled_known.astype(np.int16)
+            nearest = np.minimum(nearest, np.where(rolled_known, rolled_values, np.inf))
+            farthest = np.maximum(farthest, np.where(rolled_known, rolled_values, -np.inf))
+    can_fill = (~finite) & (count >= int(min_support)) & ((farthest - nearest) <= float(agree_m))
+    filled = depth.copy()
+    filled[can_fill] = total[can_fill] / np.maximum(count[can_fill], 1)
+    return filled
+
+
+def complete_camera_surface(
+    points_ego: np.ndarray,
+    cameras: list[dict[str, Any]],
+    image_size: tuple[int, int] = ORIGINAL_IMAGE_SIZE,
+    pixel_bin: int = VISIBLE_PIXEL_BIN,
+    fill_radius: int = 2,
+    agree_m: float = 0.6,
+    min_support: int = 4,
+) -> np.ndarray:
+    """Lidar surface sampled on the camera rays, with small agreed gaps filled.
+
+    Each camera builds a depth image from its returns, fills an empty bin only
+    when the surrounding measurements sit on one surface, and unprojects that
+    depth. The new points lie on camera rays between real hits. They do not
+    extend past a nearer surface or into bins with no supporting returns.
+    """
+    pts = np.asarray(points_ego, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] == 0 or not cameras:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    width, height = int(image_size[0]), int(image_size[1])
+    bin_size = max(int(pixel_bin), 1)
+    grid_w = (width + bin_size - 1) // bin_size
+    grid_h = (height + bin_size - 1) // bin_size
+    clouds: list[np.ndarray] = []
+
+    for camera in cameras:
+        intrinsic = np.asarray(camera["intrinsic"], dtype=np.float64).reshape(3, 3)
+        rotation = quat_to_rotmat(np.asarray(camera["rotation"], dtype=np.float64))
+        translation = np.asarray(camera["translation"], dtype=np.float64).reshape(3)
+        cam = (pts - translation.reshape(1, 3)) @ rotation
+        depth = cam[:, 2]
+        in_front = depth > VISIBLE_MIN_DEPTH_M
+        if not np.any(in_front):
+            continue
+        pix = cam @ intrinsic.T
+        u = np.divide(pix[:, 0], depth, out=np.full(depth.shape, -1.0), where=in_front)
+        v = np.divide(pix[:, 1], depth, out=np.full(depth.shape, -1.0), where=in_front)
+        inside = in_front & (u >= 0.0) & (v >= 0.0) & (u < width) & (v < height)
+        if not np.any(inside):
+            continue
+        zbuf = np.full((grid_h, grid_w), np.inf, dtype=np.float64)
+        ui = np.minimum((u[inside] / bin_size).astype(np.int64), grid_w - 1)
+        vi = np.minimum((v[inside] / bin_size).astype(np.int64), grid_h - 1)
+        np.minimum.at(zbuf, (vi, ui), depth[inside])
+        zbuf = _fill_agreed_depth(zbuf, int(fill_radius), float(agree_m), int(min_support))
+        yy, xx = np.nonzero(np.isfinite(zbuf))
+        if yy.size == 0:
+            continue
+        ray_depth = zbuf[yy, xx]
+        uc = (xx.astype(np.float64) + 0.5) * bin_size
+        vc = (yy.astype(np.float64) + 0.5) * bin_size
+        rays = np.stack((uc, vc, np.ones(uc.shape[0], dtype=np.float64)), axis=0)
+        cam_pts = (np.linalg.inv(intrinsic) @ rays) * ray_depth
+        ego = (rotation @ cam_pts).T + translation.reshape(1, 3)
+        clouds.append(ego)
+
+    if not clouds:
+        return np.zeros((0, 3), dtype=np.float32)
+    return clip_to_bounds(np.concatenate(clouds, axis=0)).astype(np.float32)
+
+
+def camera_space_points(
+    points_ego: np.ndarray,
+    cameras: list[dict[str, Any]],
+) -> np.ndarray:
+    """Measured in-view hits plus the agreed surface sampled on the camera rays."""
+    visible = camera_visible_points(points_ego, cameras)
+    surface = complete_camera_surface(points_ego, cameras)
+    if surface.shape[0] == 0:
+        return visible
+    if visible.shape[0] == 0:
+        return surface
+    return np.concatenate((visible, surface), axis=0).astype(np.float32, copy=False)
 
 
 def clip_to_bounds(points: np.ndarray, bounds: np.ndarray = EGO_BOUNDS) -> np.ndarray:
@@ -743,7 +856,7 @@ def project_cameras_to_voxel_pair(
         origin=origin,
         cap=False,
     )
-    visible_lidar = camera_visible_points(lidar_points, camera_payloads)
+    visible_lidar = camera_space_points(lidar_points, camera_payloads)
     gt_centers, gt_occ = voxelize_lidar(visible_lidar, voxel_size, cap=False)
     # One cell of slack: the lidar shell and the depth sheet share a surface
     # but rarely the identical 0.2 m bin.

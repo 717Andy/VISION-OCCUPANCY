@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from nuscenes_loader import CAMERA_IDS, DATA_ROOT, load_synchronized_frame
-from projection import EGO_BOUNDS, camera_to_ego, camera_visible_points
+from projection import EGO_BOUNDS, camera_space_points, camera_to_ego
 
 LIDAR_DIR = DATA_ROOT / "lidar"
 # Store one point per cell so the clip stays small and still finer than the UI voxels.
@@ -41,7 +41,7 @@ def camera_space_lidar(frame_index: int, points: np.ndarray | None = None) -> np
         }
         for camera_id in CAMERA_IDS
     ]
-    return camera_visible_points(cloud, cameras)
+    return camera_space_points(cloud, cameras)
 
 
 def load_lidar_ego_points(frame_index: int) -> np.ndarray:

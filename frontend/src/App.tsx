@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { VoxelCanvas, createSharedOrbit } from './VoxelCanvas';
+import { VoxelCanvas, createSharedOrbit, MAX_INSTANCES } from './VoxelCanvas';
 import { ControlPanel } from './ControlPanel';
 import { CameraFeed } from './CameraFeed';
 import { PlaybackBar } from './PlaybackBar';
@@ -113,7 +113,7 @@ export const App: React.FC = () => {
     };
 
     const decodeVoxels = (floats: Float32Array, count: number): VoxelData[] => {
-      const stride = Math.max(1, Math.ceil(count / 900));
+      const stride = Math.max(1, Math.ceil(count / MAX_INSTANCES));
       const kept = Math.ceil(count / stride);
       const voxelList: VoxelData[] = new Array(kept);
       let written = 0;
@@ -282,7 +282,7 @@ export const App: React.FC = () => {
           <VoxelCanvas
             className="pane pane-voxel pane-gt"
             title="Ground Truth"
-            subtitle="Camera-visible lidar"
+            subtitle="Camera-space lidar"
             voxelsRef={gtVoxelsRef}
             voxelSize={controls.voxelSize}
             layers={controls.layers}

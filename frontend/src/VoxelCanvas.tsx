@@ -38,7 +38,7 @@ interface VoxelCanvasProps {
   onDiscrepancyColorChange?: (color: string) => void;
 }
 
-const MAX_INSTANCES = 900;
+export const MAX_INSTANCES = 8000;
 // A real click drifts a few pixels, and these cubes are only a handful of
 // pixels across. Treat that as a click on whatever the press hit. A longer
 // move is an orbit drag and should not open or close the inspector.
