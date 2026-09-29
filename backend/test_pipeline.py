@@ -53,7 +53,7 @@ class OccupancyTensorTests(unittest.TestCase):
         self.assertGreater(gt_n, 0)
         self.assertGreater(err_n, 0)
         self.assertEqual(len(payload), 12 + (pred_n + gt_n + err_n) * 16)
-        self.assertEqual(pipeline.gt_source, "lidar-top")
+        self.assertEqual(pipeline.gt_source, "lidar-visible")
         self.assertLess(pipeline.last_miou, 1.0)
         gt = np.frombuffer(
             payload[12 + pred_n * 16 : 12 + (pred_n + gt_n) * 16], dtype=np.float32

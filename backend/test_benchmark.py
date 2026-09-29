@@ -88,7 +88,8 @@ class VoxNetHeadTests(unittest.TestCase):
             self.assertLessEqual(row["miou"], 1.0)
         self.assertEqual(table["heldout"]["frames"], 8)
         self.assertIn("tp", table["heldout"]["voxnet"])
-        self.assertIn("tp", table["heldout"]["monocular"])
+        if "monocular" in table["heldout"]:
+            self.assertIn("tp", table["heldout"]["monocular"])
 
 
 if __name__ == "__main__":

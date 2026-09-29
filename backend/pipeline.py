@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from lidar_gt import load_lidar_ego_points
+from lidar_gt import camera_space_lidar, load_lidar_ego_points
 from midas_engine import MidasDepthEngine
 from nuscenes_loader import CAMERA_IDS, ClipNotPrepared, load_rgb, load_synchronized_frame
 from projection import (
@@ -81,9 +81,10 @@ class PerceptionPipeline:
         lidar_points: np.ndarray | None = None,
     ) -> bytes:
         points = load_lidar_ego_points(frame_index) if lidar_points is None else lidar_points
+        points = camera_space_lidar(frame_index, points)
         gt_centers, gt_occ = voxelize_lidar(points, voxel_size)
         self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size, tolerance=1)
-        self.gt_source = "lidar-top" if gt_centers.shape[0] else "unavailable"
+        self.gt_source = "lidar-visible" if gt_centers.shape[0] else "unavailable"
         err_centers, err_occ = discrepancy_voxels(
             pred_centers, gt_centers, voxel_size, origin=EGO_BOUNDS[:, 0]
         )
@@ -209,7 +210,7 @@ class PerceptionPipeline:
         self.last_project_ms = (time.perf_counter() - start) * 1000.0
         self.last_depth_ms = depth_ms
         self.last_miou = miou
-        self.gt_source = "lidar-top" if gt_c.shape[0] else "unavailable"
+        self.gt_source = "lidar-visible" if gt_c.shape[0] else "unavailable"
         return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, err_c, err_o)
 
     def warmup(self) -> None:

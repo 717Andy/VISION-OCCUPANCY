@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from nuscenes_loader import DATA_ROOT
-from projection import EGO_BOUNDS, camera_to_ego
+from nuscenes_loader import CAMERA_IDS, DATA_ROOT, load_synchronized_frame
+from projection import EGO_BOUNDS, camera_to_ego, camera_visible_points
 
 LIDAR_DIR = DATA_ROOT / "lidar"
 # Store one point per cell so the clip stays small and still finer than the UI voxels.
@@ -17,6 +17,31 @@ MAX_STORED_POINTS = 30_000
 
 def lidar_path(frame_index: int) -> Path:
     return LIDAR_DIR / f"{int(frame_index):04d}.npy"
+
+
+def camera_space_lidar(frame_index: int, points: np.ndarray | None = None) -> np.ndarray:
+    """Lidar returns restricted to the surfaces the six cameras can see.
+
+    When the frame has no calibration, the sweep is returned unchanged so a
+    missing clip does not erase an explicitly supplied cloud.
+    """
+    cloud = load_lidar_ego_points(frame_index) if points is None else np.asarray(points, dtype=np.float32)
+    cloud = cloud.reshape(-1, 3)
+    if cloud.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    try:
+        frame = load_synchronized_frame(int(frame_index))
+    except Exception:
+        return cloud.astype(np.float32, copy=False)
+    cameras = [
+        {
+            "intrinsic": frame.cameras[camera_id].intrinsic,
+            "rotation": frame.cameras[camera_id].rotation,
+            "translation": frame.cameras[camera_id].translation,
+        }
+        for camera_id in CAMERA_IDS
+    ]
+    return camera_visible_points(cloud, cameras)
 
 
 def load_lidar_ego_points(frame_index: int) -> np.ndarray:

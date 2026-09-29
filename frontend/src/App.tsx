@@ -282,7 +282,7 @@ export const App: React.FC = () => {
           <VoxelCanvas
             className="pane pane-voxel pane-gt"
             title="Ground Truth"
-            subtitle="nuScenes LiDAR"
+            subtitle="Camera-visible lidar"
             voxelsRef={gtVoxelsRef}
             voxelSize={controls.voxelSize}
             layers={controls.layers}
