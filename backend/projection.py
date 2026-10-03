@@ -234,6 +234,294 @@ def camera_to_ego(points_cam: np.ndarray, rotation_wxyz: np.ndarray, translation
     return (rot @ pts.T).T + trans
 
 
+# Angular bin for the camera z-buffer. Eight native pixels is about one
+# occupancy cell across the nuScenes depth range.
+VISIBLE_PIXEL_BIN = 8
+VISIBLE_SURFACE_M = 0.4
+VISIBLE_MIN_DEPTH_M = 0.5
+
+
+def camera_visible_points(
+    points_ego: np.ndarray,
+    cameras: list[dict[str, Any]],
+    image_size: tuple[int, int] = ORIGINAL_IMAGE_SIZE,
+    pixel_bin: int = VISIBLE_PIXEL_BIN,
+    surface_m: float = VISIBLE_SURFACE_M,
+) -> np.ndarray:
+    """Keep lidar returns that are the first surface in the camera images.
+
+    Each camera keeps points that land inside its image and sit within
+    `surface_m` of the nearest return in that angular bin. Returns outside
+    every frame, behind the cameras, or hidden behind a closer surface are
+    dropped. The result is the lidar measurement of the space the feeds see.
+    """
+    pts = np.asarray(points_ego, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] == 0 or not cameras:
+        return pts.astype(np.float32, copy=False)
+
+    width, height = int(image_size[0]), int(image_size[1])
+    bin_size = max(int(pixel_bin), 1)
+    grid_w = (width + bin_size - 1) // bin_size
+    grid_h = (height + bin_size - 1) // bin_size
+    visible = np.zeros(pts.shape[0], dtype=bool)
+    thickness = float(max(surface_m, 0.0))
+
+    for camera in cameras:
+        intrinsic = np.asarray(camera["intrinsic"], dtype=np.float64).reshape(3, 3)
+        rotation = quat_to_rotmat(np.asarray(camera["rotation"], dtype=np.float64))
+        translation = np.asarray(camera["translation"], dtype=np.float64).reshape(1, 3)
+        cam = (pts - translation) @ rotation
+        depth = cam[:, 2]
+        in_front = depth > VISIBLE_MIN_DEPTH_M
+        if not np.any(in_front):
+            continue
+        pix = cam @ intrinsic.T
+        u = np.divide(pix[:, 0], depth, out=np.full(depth.shape, -1.0), where=in_front)
+        v = np.divide(pix[:, 1], depth, out=np.full(depth.shape, -1.0), where=in_front)
+        inside = in_front & (u >= 0.0) & (v >= 0.0) & (u < width) & (v < height)
+        if not np.any(inside):
+            continue
+        ui = np.minimum((u[inside] / bin_size).astype(np.int64), grid_w - 1)
+        vi = np.minimum((v[inside] / bin_size).astype(np.int64), grid_h - 1)
+        flat = vi * grid_w + ui
+        zbuf = np.full(grid_h * grid_w, np.inf, dtype=np.float64)
+        np.minimum.at(zbuf, flat, depth[inside])
+        on_surface = depth[inside] <= zbuf[flat] + thickness
+        visible[np.flatnonzero(inside)[on_surface]] = True
+
+    return pts[visible].astype(np.float32)
+
+
+def _points_visible_to_camera(
+    points_ego: np.ndarray,
+    camera: dict[str, Any],
+    image_size: tuple[int, int] = ORIGINAL_IMAGE_SIZE,
+    pixel_bin: int = VISIBLE_PIXEL_BIN,
+    surface_m: float = VISIBLE_SURFACE_M,
+) -> np.ndarray:
+    """Returns from `points_ego` that form this camera's nearest surface."""
+    kept = camera_visible_points(points_ego, [camera], image_size, pixel_bin, surface_m)
+    return kept
+
+
+def _cell_keys_from_points(
+    points: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray,
+) -> set[tuple[int, int, int]]:
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] == 0:
+        return set()
+    idx = np.floor((pts - origin) / float(voxel_size)).astype(np.int64)
+    return {tuple(int(v) for v in row) for row in idx.tolist()}
+
+
+def _centers_from_keys(
+    keys: set[tuple[int, int, int]],
+    voxel_size: float,
+    origin: np.ndarray,
+) -> np.ndarray:
+    if not keys:
+        return np.zeros((0, 3), dtype=np.float32)
+    idx = np.array(sorted(keys), dtype=np.float64)
+    return (origin + (idx + 0.5) * float(voxel_size)).astype(np.float32)
+
+
+def _free_keys_along_rays(
+    hits: np.ndarray,
+    camera_xyz: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray,
+    bounds: np.ndarray,
+    occupied: set[tuple[int, int, int]],
+) -> set[tuple[int, int, int]]:
+    """Cells a camera ray crosses before it reaches a measured hit."""
+    pts = np.asarray(hits, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] == 0:
+        return set()
+    cam = np.asarray(camera_xyz, dtype=np.float64).reshape(3)
+    size = float(voxel_size)
+    step = size * 0.5
+    mins = np.asarray(bounds[:, 0], dtype=np.float64)
+    maxs = np.asarray(bounds[:, 1], dtype=np.float64)
+    free: set[tuple[int, int, int]] = set()
+    for start in range(0, pts.shape[0], 256):
+        chunk = pts[start : start + 256]
+        delta = chunk - cam
+        dist = np.linalg.norm(delta, axis=1)
+        usable = dist > step
+        if not np.any(usable):
+            continue
+        max_steps = int(np.max(dist[usable]) / step)
+        if max_steps <= 1:
+            continue
+        distances = (np.arange(1, max_steps, dtype=np.float64) * step)[None, :]
+        valid = distances < (dist[:, None] - step * 0.25)
+        samples = cam + (distances / dist[:, None])[..., None] * delta[:, None, :]
+        flat = samples[valid]
+        if flat.shape[0] == 0:
+            continue
+        inside = np.all((flat >= mins) & (flat <= maxs), axis=1)
+        flat = flat[inside]
+        if flat.shape[0] == 0:
+            continue
+        idx = np.floor((flat - origin) / size).astype(np.int64)
+        uniq = np.unique(idx, axis=0)
+        for row in uniq.tolist():
+            key = (int(row[0]), int(row[1]), int(row[2]))
+            if key not in occupied:
+                free.add(key)
+    return free
+
+
+def camera_known_space(
+    points_ego: np.ndarray,
+    cameras: list[dict[str, Any]] | None,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+    bounds: np.ndarray = EGO_BOUNDS,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Occupied hits, free cells on the way to those hits, and occupancy weights.
+
+    Unknown space is everything else. Without camera calibration the occupied
+    cloud is the lidar sweep and free space is empty, so callers can fall back
+    to treating unlabeled cells as empty.
+    """
+    origin_vec = EGO_BOUNDS[:, 0] if origin is None else np.asarray(origin, dtype=np.float64)
+    points = np.asarray(points_ego, dtype=np.float64).reshape(-1, 3)
+    if cameras:
+        visible = camera_visible_points(points, cameras)
+    else:
+        visible = points.astype(np.float32, copy=False)
+    occupied, weights = voxelize_lidar(visible, voxel_size, bounds, cap=False)
+    if not cameras or occupied.shape[0] == 0:
+        return occupied, np.zeros((0, 3), dtype=np.float32), weights
+    occupied_keys = _cell_keys_from_points(occupied, voxel_size, origin_vec)
+    free: set[tuple[int, int, int]] = set()
+    for camera in cameras:
+        hits = _points_visible_to_camera(points, camera)
+        free |= _free_keys_along_rays(
+            hits,
+            np.asarray(camera["translation"], dtype=np.float64),
+            voxel_size,
+            origin_vec,
+            bounds,
+            occupied_keys,
+        )
+    free -= occupied_keys
+    return occupied, _centers_from_keys(free, voxel_size, origin_vec), weights
+
+
+def _keys_near(
+    source: set[tuple[int, int, int]],
+    target: set[tuple[int, int, int]],
+    radius: int,
+) -> set[tuple[int, int, int]]:
+    if radius <= 0:
+        return source & target
+    matched: set[tuple[int, int, int]] = set()
+    for x, y, z in source:
+        found = False
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                for dz in range(-radius, radius + 1):
+                    if (x + dx, y + dy, z + dz) in target:
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if found:
+            matched.add((x, y, z))
+    return matched
+
+
+def known_space_counts(
+    pred_centers: np.ndarray,
+    occupied_centers: np.ndarray,
+    free_centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+    tolerance: int = 0,
+    unlabeled_is_free: bool = False,
+) -> dict[str, Any]:
+    """IoU on cells labeled occupied or free. Unknown predictions are ignored.
+
+    A predicted cell counts only when that exact cell is known. Tolerance is a
+    Chebyshev radius used to match a known prediction to an occupied cell, so a
+    one-bin miss can still be a true positive. mIoU is the mean of that IoU
+    over height bands, which are not semantic classes.
+    """
+    size = float(max(voxel_size, 0.05))
+    origin_vec = np.zeros(3, dtype=np.float64) if origin is None else np.asarray(origin, dtype=np.float64)
+    radius = max(int(tolerance), 0)
+    pred = _cell_keys_from_points(pred_centers, size, origin_vec)
+    occupied = _cell_keys_from_points(occupied_centers, size, origin_vec)
+    free = _cell_keys_from_points(free_centers, size, origin_vec) - occupied
+    if unlabeled_is_free:
+        pred_known = pred
+        false_positive_pool = pred - occupied
+    else:
+        known = occupied | free
+        pred_known = pred & known
+        false_positive_pool = pred_known
+    true_positive_keys = _keys_near(pred_known, occupied, radius)
+    false_positive_keys = false_positive_pool - true_positive_keys
+    false_negative_keys = occupied - _keys_near(occupied, pred_known, radius)
+    binary = _iou_from_counts(len(true_positive_keys), len(false_positive_keys), len(false_negative_keys))
+
+    bands: list[dict[str, Any]] = []
+    band_ious: list[float] = []
+    for label, class_name in HEIGHT_BANDS:
+        def in_band(key: tuple[int, int, int], name: str = class_name) -> bool:
+            return _class_of_key(key, origin_vec, size) == name
+
+        tp = sum(1 for key in true_positive_keys if in_band(key))
+        fp = sum(1 for key in false_positive_keys if in_band(key))
+        fn = sum(1 for key in false_negative_keys if in_band(key))
+        if tp + fp + fn == 0:
+            continue
+        iou = _iou_from_counts(tp, fp, fn)
+        band_ious.append(iou)
+        bands.append({"band": label, "tp": tp, "fp": fp, "fn": fn, "iou": iou})
+
+    return {
+        "tp": len(true_positive_keys),
+        "fp": len(false_positive_keys),
+        "fn": len(false_negative_keys),
+        "iou": binary,
+        "miou": float(sum(band_ious) / len(band_ious)) if band_ious else binary,
+        "bands": bands,
+        "tolerance_cells": radius,
+        "grid_m": size,
+        "unknown": "ignored",
+    }
+
+
+def known_space_error_voxels(
+    pred_centers: np.ndarray,
+    occupied_centers: np.ndarray,
+    free_centers: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+    *,
+    cap: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Exact known-cell mistakes: predicted free cells, and missed occupied cells."""
+    counts_origin = EGO_BOUNDS[:, 0] if origin is None else np.asarray(origin, dtype=np.float64)
+    size = float(max(voxel_size, 0.05))
+    pred = _cell_keys_from_points(pred_centers, size, counts_origin)
+    occupied = _cell_keys_from_points(occupied_centers, size, counts_origin)
+    free = _cell_keys_from_points(free_centers, size, counts_origin) - occupied
+    mistakes = (pred & free) | (occupied - pred)
+    centers = _centers_from_keys(mistakes, size, counts_origin)
+    occupancy = np.ones((centers.shape[0],), dtype=np.float32)
+    if cap:
+        return _cap_voxels(centers, occupancy)
+    return centers, occupancy
+
+
 def clip_to_bounds(points: np.ndarray, bounds: np.ndarray = EGO_BOUNDS) -> np.ndarray:
     pts = np.asarray(points, dtype=np.float64)
     if pts.size == 0:
@@ -477,6 +765,12 @@ def grid_miou(
 
 # Height bands match the viewer: z < 0.45 driveable, z < 2.3 vehicle, else pedestrian.
 SEMANTIC_CLASSES = ("driveable", "vehicle", "pedestrian")
+# Display names for the same z cuts. These are height bands, not object classes.
+HEIGHT_BANDS = (
+    ("below 0.45 m", "driveable"),
+    ("0.45 to 2.3 m", "vehicle"),
+    ("above 2.3 m", "pedestrian"),
+)
 
 
 def semantic_class_for_z(z: float) -> str:
@@ -685,14 +979,20 @@ def project_cameras_to_voxel_pair(
         origin=origin,
         cap=False,
     )
-    gt_centers, gt_occ = voxelize_lidar(lidar_points, voxel_size, cap=False)
-    # One cell of slack: the lidar shell and the depth sheet share a surface
-    # but rarely the identical 0.2 m bin.
-    miou = grid_miou(pred_centers, gt_centers, voxel_size, origin=origin, tolerance=1)
-    err_centers, err_occ = discrepancy_voxels(pred_centers, gt_centers, voxel_size, origin=origin)
+    occupied, free, weights = camera_known_space(
+        lidar_points, camera_payloads, voxel_size, origin=origin
+    )
+    # One cell of slack on the live grid. Unknown cells are not errors.
+    score = known_space_counts(
+        pred_centers, occupied, free, voxel_size, origin=origin, tolerance=1
+    )
+    miou = float(score["iou"])
+    err_centers, err_occ = known_space_error_voxels(
+        pred_centers, occupied, free, voxel_size, origin=origin
+    )
     pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
-    gt_centers, gt_occ = _cap_voxels(gt_centers, gt_occ)
+    gt_centers, gt_occ = _cap_voxels(occupied, weights)
     size = float(max(voxel_size, 0.05))
     _touch_open3d(pred_centers, size)
     _touch_open3d(gt_centers, size)
-    return pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ, miou
+    return pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ, miou, score

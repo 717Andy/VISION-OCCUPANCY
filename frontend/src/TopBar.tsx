@@ -45,7 +45,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <span>]</span>
       </div>
       <div className="hud">
-        HUD: {fps} FPS | Latency: {latencyMs.toFixed(1)}ms | mIoU: {miou} | GPU: {gpu}
+        HUD: {fps} FPS | Latency: {latencyMs.toFixed(1)}ms | IoU: {miou} | GPU: {gpu}
       </div>
     </header>
   );

@@ -49,8 +49,8 @@ export interface ControlsState {
   layers: Record<SemanticClass, boolean>;
 }
 
-export interface BenchmarkClassCount {
-  class: string;
+export interface BenchmarkBandCount {
+  band: string;
   tp: number;
   fp: number;
   fn: number;
@@ -64,7 +64,7 @@ export interface BenchmarkRow {
   fn: number;
   iou: number;
   miou: number;
-  classes?: BenchmarkClassCount[];
+  bands?: BenchmarkBandCount[];
 }
 
 export interface BenchmarkScore {
@@ -77,10 +77,13 @@ export interface BenchmarkScore {
 
 export interface BenchmarkTable {
   voxel_m: number;
+  tolerance_cells?: number;
+  unknown?: string;
   frame_index: number;
   split: string;
   monocular_threshold: number;
   voxnet_threshold: number;
+  checkpoint_id?: string;
   scoring?: string;
   rows: BenchmarkRow[];
   heldout?: {
@@ -94,6 +97,6 @@ export interface BenchmarkTable {
 export interface SelectedVoxel {
   voxel: VoxelData;
   meters: { x: number; y: number; z: number };
-  depthSource: string;
-  flow: { vx: number; vy: number };
+  source: string;
+  cameras: string;
 }

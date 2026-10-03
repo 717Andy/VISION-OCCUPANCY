@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import nn
 
-from lidar_gt import load_lidar_ego_points
+from lidar_gt import camera_space_lidar
 from nuscenes_loader import CAMERA_IDS, load_manifest, load_synchronized_frame
 from projection import EGO_BOUNDS, quat_to_rotmat
 
@@ -28,8 +28,22 @@ logger = logging.getLogger(__name__)
 
 BENCH_VOXEL_M = 1.0
 CHECKPOINT_PATH = Path(__file__).resolve().parent / "data" / "voxnet_baseline.pt"
+_CHECKPOINT_ID: str | None = None
 IMAGE_SIZE = (128, 72)  # width, height
 FEATURE_CHANNELS = 8
+
+
+def checkpoint_id() -> str:
+    """Short hash of the weight file so a score can be tied to a checkpoint."""
+    global _CHECKPOINT_ID
+    if _CHECKPOINT_ID is not None:
+        return _CHECKPOINT_ID
+    if not CHECKPOINT_PATH.is_file():
+        return "missing"
+    import hashlib
+
+    _CHECKPOINT_ID = hashlib.sha256(CHECKPOINT_PATH.read_bytes()).hexdigest()[:12]
+    return _CHECKPOINT_ID
 
 
 def held_out(frame_index: int) -> bool:
@@ -150,7 +164,7 @@ def _sample_features(
 
 def _lidar_target(frame_index: int, shape: tuple[int, int, int]) -> torch.Tensor:
     """Binary occupancy volume (1, 1, Z, Y, X). Lidar is the label, not a feature."""
-    points = load_lidar_ego_points(frame_index)
+    points = camera_space_lidar(frame_index)
     nx, ny, nz = shape
     target = np.zeros((nx, ny, nz), dtype=np.float32)
     if points.shape[0]:
@@ -316,15 +330,19 @@ def _heldout_summary(
         return _occupied_centers(model, frame_index, threshold, centers, centers_np, shape)
 
     mono_threshold = 0.38
-    return {
+    summary: dict[str, object] = {
         "frames": len(frame_ids),
         "monocular_threshold": mono_threshold,
         "voxnet": micro_summary(predict, frame_ids),
-        "monocular": micro_summary(
+    }
+    try:
+        summary["monocular"] = micro_summary(
             lambda frame_index: monocular_centers(frame_index, mono_threshold),
             frame_ids,
-        ),
-    }
+        )
+    except FileNotFoundError as exc:
+        logger.warning("Skipping monocular held-out summary: %s", exc)
+    return summary
 
 
 def _select_threshold(
@@ -344,7 +362,7 @@ def _select_threshold(
             volume = _feature_volume(model, frame_index, centers, shape)
             prob = torch.sigmoid(model.forward_logits(volume))[0, 0].cpu().numpy()
             probs.append(prob)
-            gt, _ = voxelize_lidar(load_lidar_ego_points(frame_index), BENCH_VOXEL_M, cap=False)
+            gt, _ = voxelize_lidar(camera_space_lidar(frame_index), BENCH_VOXEL_M, cap=False)
             gts.append(gt)
     best_t = 0.5
     best_iou = -1.0

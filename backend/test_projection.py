@@ -7,7 +7,6 @@ import unittest
 import numpy as np
 
 from projection import (
-    occupancy_counts,
     EGO_BOUNDS,
     FAR_M,
     NEAR_M,
@@ -17,6 +16,9 @@ from projection import (
     gt_occupancy_threshold,
     occupancy_counts,
     metric_depth_from_ground,
+    camera_known_space,
+    camera_visible_points,
+    known_space_counts,
     discrepancy_voxels,
     pack_occupancy,
     pack_occupancy_pair,
@@ -25,6 +27,38 @@ from projection import (
     unproject_depth,
     voxelize_occupancy,
 )
+
+
+def _quat_wxyz(rotation: np.ndarray) -> np.ndarray:
+    """Quaternion (w, x, y, z) for a rotation matrix."""
+    matrix = np.asarray(rotation, dtype=np.float64)
+    trace = float(np.trace(matrix))
+    if trace > 0.0:
+        scale = np.sqrt(trace + 1.0) * 2.0
+        w = 0.25 * scale
+        x = (matrix[2, 1] - matrix[1, 2]) / scale
+        y = (matrix[0, 2] - matrix[2, 0]) / scale
+        z = (matrix[1, 0] - matrix[0, 1]) / scale
+    elif matrix[0, 0] > matrix[1, 1] and matrix[0, 0] > matrix[2, 2]:
+        scale = np.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
+        w = (matrix[2, 1] - matrix[1, 2]) / scale
+        x = 0.25 * scale
+        y = (matrix[0, 1] + matrix[1, 0]) / scale
+        z = (matrix[0, 2] + matrix[2, 0]) / scale
+    elif matrix[1, 1] > matrix[2, 2]:
+        scale = np.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
+        w = (matrix[0, 2] - matrix[2, 0]) / scale
+        x = (matrix[0, 1] + matrix[1, 0]) / scale
+        y = 0.25 * scale
+        z = (matrix[1, 2] + matrix[2, 1]) / scale
+    else:
+        scale = np.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
+        w = (matrix[1, 0] - matrix[0, 1]) / scale
+        x = (matrix[0, 2] + matrix[2, 0]) / scale
+        y = (matrix[1, 2] + matrix[2, 1]) / scale
+        z = 0.25 * scale
+    quat = np.array([w, x, y, z], dtype=np.float64)
+    return quat / np.linalg.norm(quat)
 
 
 class IntrinsicScalingTests(unittest.TestCase):
@@ -226,6 +260,92 @@ class VoxelizationTests(unittest.TestCase):
         self.assertTrue(np.all(occ == 1.0))
         empty, _ = discrepancy_voxels(pred, pred, size, origin=origin, cap=False)
         self.assertEqual(empty.shape[0], 0)
+
+    def test_camera_visible_lidar_keeps_the_front_surface_only(self):
+        # Camera looks along ego +x: optical z -> ego x, optical x -> ego -y, optical y -> ego -z.
+        rotation = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        quat = _quat_wxyz(rotation)
+        np.testing.assert_allclose(quat_to_rotmat(quat), rotation, atol=1e-6)
+        camera = {
+            "intrinsic": np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]]),
+            "rotation": quat,
+            "translation": np.zeros(3),
+        }
+        front = np.array([10.0, 0.0, 0.0])
+        on_surface = np.array([10.2, 0.0, 0.0])
+        hidden = np.array([20.0, 0.0, 0.0])
+        beside = np.array([10.0, 2.0, 0.0])
+        behind = np.array([-5.0, 0.0, 0.0])
+        outside = np.array([10.0, 0.0, 8.0])
+        points = np.vstack([front, on_surface, hidden, beside, behind, outside])
+        kept = camera_visible_points(
+            points,
+            [camera],
+            image_size=(100, 100),
+            pixel_bin=4,
+            surface_m=0.4,
+        )
+
+        def contains(point: np.ndarray) -> bool:
+            if kept.shape[0] == 0:
+                return False
+            return bool(np.any(np.all(np.abs(kept - point) < 1e-3, axis=1)))
+
+        self.assertTrue(contains(front))
+        self.assertTrue(contains(on_surface))
+        self.assertTrue(contains(beside))
+        self.assertFalse(contains(hidden))
+        self.assertFalse(contains(behind))
+        self.assertFalse(contains(outside))
+
+    def test_known_space_ignores_predictions_off_the_camera_rays(self):
+        rotation = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        camera = {
+            "intrinsic": np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]]),
+            "rotation": _quat_wxyz(rotation),
+            "translation": np.zeros(3),
+        }
+        hit = np.array([[10.0, 0.0, 0.0]], dtype=np.float64)
+        occupied, free, _weights = camera_known_space(
+            hit, [camera], voxel_size=1.0, origin=np.zeros(3)
+        )
+        self.assertTrue(np.any(np.abs(occupied[:, 0] - 10.0) < 1.0))
+        self.assertGreater(free.shape[0], 0)
+        self.assertTrue(np.all(free[:, 0] < occupied[:, 0].min()))
+        on_ray = free[:1]
+        off_ray = np.array([[10.0, 8.0, 0.0]], dtype=np.float32)
+        missed = known_space_counts(on_ray, occupied, free, 1.0, origin=np.zeros(3))
+        self.assertEqual(missed["fp"], 1)
+        self.assertEqual(missed["tp"], 0)
+        ignored = known_space_counts(off_ray, occupied, free, 1.0, origin=np.zeros(3))
+        self.assertEqual(ignored["fp"], 0)
+        self.assertEqual(ignored["fn"], occupied.shape[0])
+        self.assertTrue(all("band" in row for row in ignored["bands"]))
+
+    def test_real_sweep_drops_lidar_the_cameras_cannot_see(self):
+        from lidar_gt import camera_space_lidar, load_lidar_ego_points
+
+        full = load_lidar_ego_points(0)
+        visible = camera_space_lidar(0)
+        self.assertGreater(full.shape[0], 1000)
+        self.assertLess(visible.shape[0], full.shape[0])
+        self.assertGreater(visible.shape[0], int(full.shape[0] * 0.5))
+        # The near-ego ring is mostly below the images. The feeds keep the farther road.
+        self.assertGreater(float(np.median(np.linalg.norm(visible[:, :2], axis=1))), 5.0)
 
     def test_lidar_grid_is_not_a_camera_cloud(self):
         from projection import voxelize_lidar

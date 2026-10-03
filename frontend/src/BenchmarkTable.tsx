@@ -37,7 +37,7 @@ export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({
             <th>FP</th>
             <th>FN</th>
             <th>IoU</th>
-            <th>mIoU</th>
+            <th>Band mIoU</th>
           </tr>
         </thead>
         <tbody>
@@ -54,9 +54,9 @@ export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({
         </tbody>
       </table>
       <p className="bench-note">
-        IoU = TP / (TP + FP + FN) on exact {table.voxel_m.toFixed(1)} m cells. mIoU averages the
-        driveable, vehicle, and pedestrian height bands. HUD mIoU stays the live 0.2 m score with
-        one-cell tolerance.
+        IoU = TP / (TP + FP + FN) on exact {table.voxel_m.toFixed(1)} m cells. Unknown cells are
+        ignored. Band mIoU averages the height bands below 0.45 m, 0.45 to 2.3 m, and above 2.3 m.
+        Those bands are not object classes. HUD IoU is the live 0.2 m score with one-cell tolerance.
       </p>
       {held && heldLine && (
         <p className="bench-note">

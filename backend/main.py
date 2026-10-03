@@ -94,6 +94,34 @@ def get_camera_frame(frame_index: int, camera_id: str):
     return FileResponse(path, media_type="image/jpeg")
 
 
+def _checkpoint_id() -> str:
+    from voxnet_baseline import checkpoint_id
+
+    return checkpoint_id()
+
+
+@app.get("/api/eval/frame/{frame_index}")
+def eval_frame(frame_index: int, threshold: float = 0.38):
+    """Uncapped known-cell comparison for one frame. The display cap is not applied."""
+    from benchmark import evaluation_document
+
+    try:
+        return evaluation_document(frame_index, heldout=False, threshold=threshold)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/eval/heldout")
+def eval_heldout(threshold: float = 0.38):
+    """Uncapped known-cell comparison for every held-out frame."""
+    from benchmark import evaluation_document
+
+    try:
+        return evaluation_document(None, heldout=True, threshold=threshold)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/api/telemetry")
 def telemetry():
     scene_name = None
@@ -114,9 +142,11 @@ def telemetry():
                         "last_depth_ms": pipeline.last_depth_ms,
         "last_project_ms": pipeline.last_project_ms,
         "last_miou": pipeline.last_miou,
+        "metric": pipeline.last_metric,
         "gt_source": pipeline.gt_source,
         "last_frame_index": pipeline.last_frame_index,
         "benchmark": pipeline.last_benchmark,
+        "checkpoint_id": _checkpoint_id(),
     }
 
 
@@ -191,6 +221,7 @@ async def occupancy_websocket(websocket: WebSocket):
                             "elapsed_ms": elapsed_ms,
                             "device": pipeline.engine.device,
                             "miou": pipeline.last_miou,
+                            "metric": pipeline.last_metric,
                             "gt_source": pipeline.gt_source,
                             "benchmark": pipeline.last_benchmark,
                         }

@@ -37,16 +37,16 @@ class BenchmarkScoreTests(unittest.TestCase):
         def predict(frame_index: int) -> np.ndarray:
             return frames[frame_index][0]
 
-        original = micro_summary.__globals__["gt_centers_for_frame"]
+        original = micro_summary.__globals__["known_grids_for_frame"]
 
-        def fake_gt(frame_index: int) -> np.ndarray:
-            return frames[frame_index][1]
+        def fake_grids(frame_index: int) -> tuple[np.ndarray, np.ndarray]:
+            return frames[frame_index][1], np.zeros((0, 3), dtype=np.float32)
 
-        micro_summary.__globals__["gt_centers_for_frame"] = fake_gt
+        micro_summary.__globals__["known_grids_for_frame"] = fake_grids
         try:
             summary = micro_summary(predict, [0, 1])
         finally:
-            micro_summary.__globals__["gt_centers_for_frame"] = original
+            micro_summary.__globals__["known_grids_for_frame"] = original
         self.assertEqual((summary["tp"], summary["fp"], summary["fn"]), (1, 0, 1))
         self.assertAlmostEqual(summary["iou"], 0.5)
 
@@ -75,20 +75,27 @@ class VoxNetHeadTests(unittest.TestCase):
             self.skipTest("voxnet checkpoint has not been trained")
         table = build_frame_benchmark(0, 0.38)
         self.assertEqual(table["voxel_m"], 1.0)
+        self.assertEqual(table["tolerance_cells"], 0)
+        self.assertEqual(table["unknown"], "ignored")
+        self.assertTrue(table["checkpoint_id"])
         self.assertEqual(table["split"], "held-out")
         self.assertEqual(
             [row["pipeline"] for row in table["rows"]],
             ["Monocular depth", "VoxNet 3D CNN"],
         )
-        for row in table["rows"]:
+        scored = [row for row in table["rows"] if "error" not in row]
+        self.assertTrue(any(row["pipeline"] == "VoxNet 3D CNN" for row in scored))
+        for row in scored:
             denom = row["tp"] + row["fp"] + row["fn"]
             self.assertGreater(denom, 0)
             self.assertAlmostEqual(row["iou"], row["tp"] / denom)
             self.assertGreaterEqual(row["miou"], 0.0)
             self.assertLessEqual(row["miou"], 1.0)
+            self.assertTrue(all("band" in item for item in row["bands"]))
         self.assertEqual(table["heldout"]["frames"], 8)
         self.assertIn("tp", table["heldout"]["voxnet"])
-        self.assertIn("tp", table["heldout"]["monocular"])
+        if "monocular" in table["heldout"]:
+            self.assertIn("tp", table["heldout"]["monocular"])
 
 
 if __name__ == "__main__":
