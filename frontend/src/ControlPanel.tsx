@@ -8,9 +8,9 @@ interface ControlPanelProps {
 }
 
 const LAYERS: { id: SemanticClass; label: string }[] = [
-  { id: 'driveable', label: 'Driveable Area' },
-  { id: 'vehicle', label: 'Vehicle' },
-  { id: 'pedestrian', label: 'Pedestrians' },
+  { id: 'driveable', label: 'Below 0.45 m' },
+  { id: 'vehicle', label: '0.45 to 2.3 m' },
+  { id: 'pedestrian', label: 'Above 2.3 m' },
 ];
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({ controls, onChange, onClose }) => {

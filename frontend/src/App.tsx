@@ -23,23 +23,64 @@ function classifyVoxel(x: number, y: number, z: number, _prob: number): Semantic
   return 'pedestrian';
 }
 
-function depthSourceFor(voxel: VoxelData): { label: string; id: string } {
-  // nuScenes ego: x forward, y left, z up
-  const forward = voxel.x;
-  const left = voxel.y;
-  if (forward >= 4) {
-    if (left > 4) return { label: 'Front-Left Cam', id: 'CAM_FRONT_LEFT' };
-    if (left < -4) return { label: 'Front-Right Cam', id: 'CAM_FRONT_RIGHT' };
-    return { label: 'Front Cam', id: 'CAM_FRONT' };
+const CAMERA_LABELS: Record<string, string> = {
+  CAM_FRONT: 'Front Cam',
+  CAM_FRONT_LEFT: 'Front-Left Cam',
+  CAM_FRONT_RIGHT: 'Front-Right Cam',
+  CAM_BACK: 'Back Cam',
+  CAM_BACK_LEFT: 'Back-Left Cam',
+  CAM_BACK_RIGHT: 'Back-Right Cam',
+};
+
+function rotationFromQuat(rotation: number[]): number[][] {
+  const [w, x, y, z] = rotation;
+  const n = w * w + x * x + y * y + z * z;
+  const s = n < 1e-12 ? 0 : 2 / n;
+  const wx = s * w * x;
+  const wy = s * w * y;
+  const wz = s * w * z;
+  const xx = s * x * x;
+  const xy = s * x * y;
+  const xz = s * x * z;
+  const yy = s * y * y;
+  const yz = s * y * z;
+  const zz = s * z * z;
+  return [
+    [1 - (yy + zz), xy - wz, xz + wy],
+    [xy + wz, 1 - (xx + zz), yz - wx],
+    [xz - wy, yz + wx, 1 - (xx + yy)],
+  ];
+}
+
+function camerasSeeingPoint(
+  voxel: VoxelData,
+  calibration: Record<string, { intrinsic: number[][]; translation: number[]; rotation: number[] }> | undefined,
+): { id: string; label: string; depth: number }[] {
+  if (!calibration) return [];
+  const seen: { id: string; label: string; depth: number }[] = [];
+  for (const [id, cal] of Object.entries(calibration)) {
+    const rotation = rotationFromQuat(cal.rotation);
+    const dx = voxel.x - cal.translation[0];
+    const dy = voxel.y - cal.translation[1];
+    const dz = voxel.z - cal.translation[2];
+    const cx = rotation[0][0] * dx + rotation[1][0] * dy + rotation[2][0] * dz;
+    const cy = rotation[0][1] * dx + rotation[1][1] * dy + rotation[2][1] * dz;
+    const cz = rotation[0][2] * dx + rotation[1][2] * dy + rotation[2][2] * dz;
+    if (cz <= 0.5) continue;
+    const u = (cal.intrinsic[0][0] * cx + cal.intrinsic[0][1] * cy + cal.intrinsic[0][2] * cz) / cz;
+    const v = (cal.intrinsic[1][0] * cx + cal.intrinsic[1][1] * cy + cal.intrinsic[1][2] * cz) / cz;
+    if (u >= 0 && v >= 0 && u < 1600 && v < 900) {
+      seen.push({ id, label: CAMERA_LABELS[id] ?? id, depth: cz });
+    }
   }
-  if (forward <= -2) {
-    if (left > 4) return { label: 'Back-Left Cam', id: 'CAM_BACK_LEFT' };
-    if (left < -4) return { label: 'Back-Right Cam', id: 'CAM_BACK_RIGHT' };
-    return { label: 'Back Cam', id: 'CAM_BACK' };
-  }
-  return left >= 0
-    ? { label: 'Front-Left Cam', id: 'CAM_FRONT_LEFT' }
-    : { label: 'Front-Right Cam', id: 'CAM_FRONT_RIGHT' };
+  seen.sort((a, b) => a.depth - b.depth);
+  return seen;
+}
+
+function heightBandLabel(z: number): string {
+  if (z < 0.45) return 'Below 0.45 m';
+  if (z < 2.3) return '0.45 to 2.3 m';
+  return 'Above 2.3 m';
 }
 
 const DEFAULT_CONTROLS: ControlsState = {
@@ -158,6 +199,12 @@ export const App: React.FC = () => {
             device?: string;
             voxel_source?: string;
             miou?: number;
+            metric?: {
+              grid_m?: number;
+              tolerance_cells?: number;
+              unknown?: string;
+              iou?: number;
+            };
             benchmark?: BenchmarkTableData | null;
           };
           if (msg.type === 'occupancy_meta') {
@@ -168,7 +215,12 @@ export const App: React.FC = () => {
               const source = msg.voxel_source ? ` · ${msg.voxel_source}` : '';
               setGpu(`${msg.device === 'cpu' ? 'CPU' : msg.device}${source}`);
             }
-            if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
+            if (msg.metric && typeof msg.metric.iou === 'number') {
+              const grid = msg.metric.grid_m ?? 0.2;
+              const tol = msg.metric.tolerance_cells ?? 1;
+              const unknown = msg.metric.unknown === 'ignored' ? 'unknown ignored' : 'unknown as free';
+              setMiou(`${msg.metric.iou.toFixed(2)} (${grid} m, tol ${tol}, ${unknown})`);
+            } else if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
               setMiou(msg.miou.toFixed(2));
             }
             if ('benchmark' in msg) {
@@ -230,25 +282,29 @@ export const App: React.FC = () => {
     return () => window.clearInterval(id);
   }, [playing, manifest]);
 
-  const handleSelectVoxel = useCallback((voxel: VoxelData | null) => {
+  const handleSelectVoxel = useCallback((voxel: VoxelData | null, kind: 'lidar' | 'prediction' = 'prediction') => {
     if (!voxel) {
       setSelected(null);
       return;
     }
-    const source = depthSourceFor(voxel);
-    const t = performance.now() / 1000;
+    const calibration = manifest?.frames?.[frameIndexRef.current]?.calibration;
+    const seen = camerasSeeingPoint(voxel, calibration);
     setSelected({
       voxel,
       meters: { x: voxel.x, y: voxel.y, z: voxel.z },
-      depthSource: source.label,
-      flow: {
-        vx: Math.sin(t + voxel.x * 0.2) * 4.5,
-        vy: Math.cos(t + voxel.y * 0.2) * 1.2,
-      },
+      source: kind === 'lidar' ? 'Lidar return' : 'Predicted occupancy',
+      cameras: seen.length
+        ? seen.map((camera) => camera.label).join(', ')
+        : 'None of the six cameras see this cell',
     });
-  }, []);
+  }, [manifest]);
 
-  const highlightCamera = selected ? depthSourceFor(selected.voxel).id : null;
+  const highlightCamera = selected
+    ? camerasSeeingPoint(
+        selected.voxel,
+        manifest?.frames?.[frameIndex]?.calibration,
+      )[0]?.id ?? null
+    : null;
 
   useEffect(() => {
     if (viewMode === 'split') {
@@ -282,12 +338,12 @@ export const App: React.FC = () => {
           <VoxelCanvas
             className="pane pane-voxel pane-gt"
             title="Ground Truth"
-            subtitle="Camera-visible lidar"
+            subtitle="Camera-visible lidar, real hits"
             voxelsRef={gtVoxelsRef}
             voxelSize={controls.voxelSize}
             layers={controls.layers}
             selected={selected}
-            onSelect={handleSelectVoxel}
+            onSelect={(voxel) => handleSelectVoxel(voxel, 'lidar')}
             orbitRef={orbitRef}
             orbitId="gt"
           />
@@ -300,7 +356,7 @@ export const App: React.FC = () => {
           voxelSize={controls.voxelSize}
           layers={controls.layers}
           selected={selected}
-          onSelect={handleSelectVoxel}
+          onSelect={(voxel) => handleSelectVoxel(voxel, 'prediction')}
           orbitRef={orbitRef}
           orbitId="pred"
           discrepancyRef={errorVoxelsRef}

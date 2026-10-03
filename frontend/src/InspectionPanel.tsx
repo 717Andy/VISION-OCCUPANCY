@@ -7,9 +7,9 @@ interface InspectionPanelProps {
 }
 
 const CLASS_LABEL: Record<string, string> = {
-  driveable: 'Driveable Area',
-  vehicle: 'Vehicle',
-  pedestrian: 'Pedestrian',
+  driveable: 'Below 0.45 m',
+  vehicle: '0.45 to 2.3 m',
+  pedestrian: 'Above 2.3 m',
 };
 
 function signed(n: number, digits = 1): string {
@@ -18,8 +18,8 @@ function signed(n: number, digits = 1): string {
 }
 
 export const InspectionPanel: React.FC<InspectionPanelProps> = ({ selected, onClose }) => {
-  const { voxel, meters, depthSource, flow } = selected;
-  const primary = CLASS_LABEL[voxel.cls] ?? voxel.cls;
+  const { voxel, meters, source, cameras } = selected;
+  const band = CLASS_LABEL[voxel.cls] ?? voxel.cls;
 
   return (
     <aside className="overlay-card inspect-card" role="dialog" aria-label="Voxel inspection">
@@ -39,27 +39,14 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({ selected, onCl
         Z = {signed(meters.z)}m
       </p>
 
-      <div className="field-label">Primary Class:</div>
-      <p>
-        {primary} (Confidence: {(voxel.prob * 100).toFixed(1)}%)
-      </p>
+      <div className="field-label">Height band:</div>
+      <p>{band}</p>
 
-      <div className="field-label">Secondary Probabilities:</div>
-      <p>
-        Obstacle ({Math.max(0.4, (1 - voxel.prob) * 70).toFixed(1)}%)
-        <br />
-        Free Space ({Math.max(0.3, (1 - voxel.prob) * 30).toFixed(1)}%)
-      </p>
+      <div className="field-label">Source:</div>
+      <p>{source}</p>
 
-      <div className="field-label">Flow Vector:</div>
-      <p>
-        Vx = {signed(flow.vx)} m/s
-        <br />
-        Vy = {signed(flow.vy)} m/s
-      </p>
-
-      <div className="field-label">Depth Source:</div>
-      <p>{depthSource}</p>
+      <div className="field-label">Cameras:</div>
+      <p>{cameras}</p>
     </aside>
   );
 };

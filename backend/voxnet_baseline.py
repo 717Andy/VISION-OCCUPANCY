@@ -28,8 +28,22 @@ logger = logging.getLogger(__name__)
 
 BENCH_VOXEL_M = 1.0
 CHECKPOINT_PATH = Path(__file__).resolve().parent / "data" / "voxnet_baseline.pt"
+_CHECKPOINT_ID: str | None = None
 IMAGE_SIZE = (128, 72)  # width, height
 FEATURE_CHANNELS = 8
+
+
+def checkpoint_id() -> str:
+    """Short hash of the weight file so a score can be tied to a checkpoint."""
+    global _CHECKPOINT_ID
+    if _CHECKPOINT_ID is not None:
+        return _CHECKPOINT_ID
+    if not CHECKPOINT_PATH.is_file():
+        return "missing"
+    import hashlib
+
+    _CHECKPOINT_ID = hashlib.sha256(CHECKPOINT_PATH.read_bytes()).hexdigest()[:12]
+    return _CHECKPOINT_ID
 
 
 def held_out(frame_index: int) -> bool:

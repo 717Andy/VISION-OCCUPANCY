@@ -16,7 +16,9 @@ from projection import (
     gt_occupancy_threshold,
     occupancy_counts,
     metric_depth_from_ground,
+    camera_known_space,
     camera_visible_points,
+    known_space_counts,
     discrepancy_voxels,
     pack_occupancy,
     pack_occupancy_pair,
@@ -302,6 +304,37 @@ class VoxelizationTests(unittest.TestCase):
         self.assertFalse(contains(hidden))
         self.assertFalse(contains(behind))
         self.assertFalse(contains(outside))
+
+    def test_known_space_ignores_predictions_off_the_camera_rays(self):
+        rotation = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        camera = {
+            "intrinsic": np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]]),
+            "rotation": _quat_wxyz(rotation),
+            "translation": np.zeros(3),
+        }
+        hit = np.array([[10.0, 0.0, 0.0]], dtype=np.float64)
+        occupied, free, _weights = camera_known_space(
+            hit, [camera], voxel_size=1.0, origin=np.zeros(3)
+        )
+        self.assertTrue(np.any(np.abs(occupied[:, 0] - 10.0) < 1.0))
+        self.assertGreater(free.shape[0], 0)
+        self.assertTrue(np.all(free[:, 0] < occupied[:, 0].min()))
+        on_ray = free[:1]
+        off_ray = np.array([[10.0, 8.0, 0.0]], dtype=np.float32)
+        missed = known_space_counts(on_ray, occupied, free, 1.0, origin=np.zeros(3))
+        self.assertEqual(missed["fp"], 1)
+        self.assertEqual(missed["tp"], 0)
+        ignored = known_space_counts(off_ray, occupied, free, 1.0, origin=np.zeros(3))
+        self.assertEqual(ignored["fp"], 0)
+        self.assertEqual(ignored["fn"], occupied.shape[0])
+        self.assertTrue(all("band" in row for row in ignored["bands"]))
 
     def test_real_sweep_drops_lidar_the_cameras_cannot_see(self):
         from lidar_gt import camera_space_lidar, load_lidar_ego_points

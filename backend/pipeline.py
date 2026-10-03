@@ -10,17 +10,19 @@ from typing import Any
 
 import numpy as np
 
-from lidar_gt import camera_space_lidar, load_lidar_ego_points
+from lidar_gt import load_lidar_ego_points
 from midas_engine import MidasDepthEngine
 from nuscenes_loader import CAMERA_IDS, ClipNotPrepared, load_rgb, load_synchronized_frame
 from projection import (
     EGO_BOUNDS,
+    camera_known_space,
     discrepancy_voxels,
-    grid_miou,
+    known_space_counts,
+    known_space_error_voxels,
     pack_occupancy,
     pack_occupancy_pair,
     project_cameras_to_voxel_pair,
-    voxelize_lidar,
+    _cap_voxels,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,12 +39,13 @@ class PerceptionPipeline:
         self.last_depth_ms = 0.0
         self.last_project_ms = 0.0
         self.last_miou = 0.0
+        self.last_metric: dict[str, Any] | None = None
         self.last_frame_index = 0
         self.last_benchmark: dict[str, Any] | None = None
         self.voxel_source = "trigonometric-wave"
         self.gt_source = "unavailable"
         self.engine = depth_engine if depth_engine is not None else MidasDepthEngine()
-        self._occupancy_cache: OrderedDict[tuple[int, float, float], tuple[bytes, float]] = OrderedDict()
+        self._occupancy_cache: OrderedDict[tuple[int, float, float], tuple[bytes, float, dict[str, Any]]] = OrderedDict()
         self._benchmark_cache: OrderedDict[tuple[int, float], dict[str, Any]] = OrderedDict()
         self._cache_lock = threading.Lock()
 
@@ -72,6 +75,54 @@ class PerceptionPipeline:
         centers, occupancy = self._wave_voxels(threshold, time_factor)
         return pack_occupancy(centers, occupancy)
 
+    def _cameras_for_frame(self, frame_index: int) -> list[dict[str, Any]] | None:
+        try:
+            frame = load_synchronized_frame(int(frame_index))
+        except Exception:
+            return None
+        return [
+            {
+                "intrinsic": frame.cameras[camera_id].intrinsic,
+                "rotation": frame.cameras[camera_id].rotation,
+                "translation": frame.cameras[camera_id].translation,
+            }
+            for camera_id in CAMERA_IDS
+        ]
+
+    def _store_score(self, score: dict[str, Any], voxel_size: float, unlabeled_is_free: bool) -> None:
+        self.last_miou = float(score["iou"])
+        self.last_metric = {
+            "iou": float(score["iou"]),
+            "height_band_miou": float(score["miou"]),
+            "tp": int(score["tp"]),
+            "fp": int(score["fp"]),
+            "fn": int(score["fn"]),
+            "grid_m": float(voxel_size),
+            "tolerance_cells": int(score["tolerance_cells"]),
+            "unknown": "ignored" if not unlabeled_is_free else "treated_as_free",
+            "bands": score["bands"],
+        }
+
+    def _record_known_score(
+        self,
+        pred_centers: np.ndarray,
+        occupied: np.ndarray,
+        free: np.ndarray,
+        voxel_size: float,
+        *,
+        unlabeled_is_free: bool,
+    ) -> None:
+        score = known_space_counts(
+            pred_centers,
+            occupied,
+            free,
+            voxel_size,
+            origin=EGO_BOUNDS[:, 0],
+            tolerance=1,
+            unlabeled_is_free=unlabeled_is_free,
+        )
+        self._store_score(score, voxel_size, unlabeled_is_free)
+
     def _pack_with_lidar(
         self,
         frame_index: int,
@@ -81,13 +132,27 @@ class PerceptionPipeline:
         lidar_points: np.ndarray | None = None,
     ) -> bytes:
         points = load_lidar_ego_points(frame_index) if lidar_points is None else lidar_points
-        points = camera_space_lidar(frame_index, points)
-        gt_centers, gt_occ = voxelize_lidar(points, voxel_size)
-        self.last_miou = grid_miou(pred_centers, gt_centers, voxel_size, tolerance=1)
-        self.gt_source = "lidar-visible" if gt_centers.shape[0] else "unavailable"
-        err_centers, err_occ = discrepancy_voxels(
-            pred_centers, gt_centers, voxel_size, origin=EGO_BOUNDS[:, 0]
+        cameras = self._cameras_for_frame(frame_index)
+        occupied, free, weights = camera_known_space(
+            points, cameras, voxel_size, origin=EGO_BOUNDS[:, 0]
         )
+        self._record_known_score(
+            pred_centers,
+            occupied,
+            free,
+            voxel_size,
+            unlabeled_is_free=cameras is None,
+        )
+        self.gt_source = "lidar-visible" if occupied.shape[0] else "unavailable"
+        if cameras is None:
+            err_centers, err_occ = discrepancy_voxels(
+                pred_centers, occupied, voxel_size, origin=EGO_BOUNDS[:, 0]
+            )
+        else:
+            err_centers, err_occ = known_space_error_voxels(
+                pred_centers, occupied, free, voxel_size, origin=EGO_BOUNDS[:, 0]
+            )
+        gt_centers, gt_occ = _cap_voxels(occupied, weights)
         return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ)
 
     def generate_occupancy_pair(
@@ -117,11 +182,12 @@ class PerceptionPipeline:
             cached = self._occupancy_cache.get(key)
             if cached is not None:
                 self._occupancy_cache.move_to_end(key)
-                payload, miou = cached
+                payload, miou, metric = cached
                 self.last_frame_index = int(frame_index)
                 self.last_depth_ms = 0.0
                 self.last_project_ms = 0.0
                 self.last_miou = miou
+                self.last_metric = metric
             else:
                 payload = None
         if payload is not None:
@@ -151,7 +217,7 @@ class PerceptionPipeline:
 
         self._refresh_benchmark(int(frame_index), float(threshold))
         with self._cache_lock:
-            self._occupancy_cache[key] = (payload, float(self.last_miou))
+            self._occupancy_cache[key] = (payload, float(self.last_miou), dict(self.last_metric or {}))
             self._occupancy_cache.move_to_end(key)
             while len(self._occupancy_cache) > OCCUPANCY_CACHE_LIMIT:
                 self._occupancy_cache.popitem(last=False)
@@ -201,7 +267,7 @@ class PerceptionPipeline:
             )
 
         start = time.perf_counter()
-        pred_c, pred_o, gt_c, gt_o, err_c, err_o, miou = project_cameras_to_voxel_pair(
+        pred_c, pred_o, gt_c, gt_o, err_c, err_o, _miou, score = project_cameras_to_voxel_pair(
             payloads,
             load_lidar_ego_points(frame_index),
             voxel_size,
@@ -209,7 +275,7 @@ class PerceptionPipeline:
         )
         self.last_project_ms = (time.perf_counter() - start) * 1000.0
         self.last_depth_ms = depth_ms
-        self.last_miou = miou
+        self._store_score(score, voxel_size, unlabeled_is_free=False)
         self.gt_source = "lidar-visible" if gt_c.shape[0] else "unavailable"
         return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, err_c, err_o)
 
