@@ -20,6 +20,7 @@ from projection import (
     camera_visible_points,
     known_space_counts,
     discrepancy_voxels,
+    display_label_clouds,
     pack_occupancy,
     pack_occupancy_pair,
     quat_to_rotmat,
@@ -230,11 +231,13 @@ class VoxelizationTests(unittest.TestCase):
         err_c = np.array([[3.0, 0.0, 1.0]], dtype=np.float32)
         err_o = np.array([1.0], dtype=np.float32)
         payload = pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, err_c, err_o)
-        pred_n, gt_n, err_n = np.frombuffer(payload[:12], dtype=np.uint32)
+        pred_n, gt_n, err_n, free_n, unk_n = np.frombuffer(payload[:20], dtype=np.uint32)
         self.assertEqual(int(pred_n), 1)
         self.assertEqual(int(gt_n), 2)
         self.assertEqual(int(err_n), 1)
-        body = np.frombuffer(payload[12:], dtype=np.float32)
+        self.assertEqual(int(free_n), 0)
+        self.assertEqual(int(unk_n), 0)
+        body = np.frombuffer(payload[20:], dtype=np.float32)
         self.assertEqual(body.size, (1 + 2 + 1) * 4)
         np.testing.assert_allclose(body[:4], [1.0, 2.0, 0.5, 0.9])
         np.testing.assert_allclose(body[4:8], [1.0, 2.0, 0.5, 0.9])
@@ -335,6 +338,20 @@ class VoxelizationTests(unittest.TestCase):
         self.assertEqual(ignored["fp"], 0)
         self.assertEqual(ignored["fn"], occupied.shape[0])
         self.assertTrue(all("band" in row for row in ignored["bands"]))
+
+    def test_unknown_display_skips_occupied_and_free_cells(self):
+        bounds = np.array([[0.0, 4.0], [0.0, 4.0], [0.0, 4.0]], dtype=np.float64)
+        occupied = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)
+        free = np.array([[1.5, 0.5, 0.5]], dtype=np.float32)
+        _free_c, _free_o, unknown, unknown_occ = display_label_clouds(
+            occupied, free, 1.0, origin=np.zeros(3), bounds=bounds
+        )
+        self.assertGreater(unknown.shape[0], 0)
+        self.assertEqual(unknown.shape[0], unknown_occ.shape[0])
+        self.assertLessEqual(unknown.shape[0], 4000)
+        for point in unknown:
+            self.assertFalse(np.all(np.abs(point - occupied[0]) < 0.2))
+            self.assertFalse(np.all(np.abs(point - free[0]) < 0.2))
 
     def test_real_sweep_drops_lidar_the_cameras_cannot_see(self):
         from lidar_gt import camera_space_lidar, load_lidar_ego_points

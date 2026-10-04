@@ -98,5 +98,38 @@ class VoxNetHeadTests(unittest.TestCase):
             self.assertIn("tp", table["heldout"]["monocular"])
 
 
+class RunStoreTests(unittest.TestCase):
+    def test_registry_lists_the_built_in_models(self):
+        from benchmark import registered_predictors
+
+        names = [name for name, _predict, _identity in registered_predictors()]
+        self.assertEqual(names, ["Monocular depth", "VoxNet 3D CNN"])
+
+    def test_saved_run_can_be_listed_and_loaded(self):
+        from benchmark import RUNS_DIR, list_runs, load_run, save_run
+
+        saved = save_run(
+            {
+                "checkpoint_id": "testcid",
+                "scene_name": "scene-0103",
+                "frame": {
+                    "frame_index": 0,
+                    "rows": [
+                        {"pipeline": "VoxNet 3D CNN", "iou": 0.5, "tp": 1, "fp": 1, "fn": 0}
+                    ],
+                },
+            }
+        )
+        path = RUNS_DIR / f"{saved['id']}.json"
+        try:
+            self.assertTrue(path.is_file())
+            self.assertIn(saved["id"], [row["id"] for row in list_runs()])
+            loaded = load_run(saved["id"])
+            self.assertEqual(loaded["checkpoint_id"], "testcid")
+            self.assertEqual(loaded["frame"]["rows"][0]["tp"], 1)
+        finally:
+            path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

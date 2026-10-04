@@ -522,6 +522,72 @@ def known_space_error_voxels(
     return centers, occupancy
 
 
+def display_label_clouds(
+    occupied: np.ndarray,
+    free: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None = None,
+    bounds: np.ndarray = EGO_BOUNDS,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Capped free and unknown clouds for the viewer. Scoring does not use these."""
+    free_occ = np.ones((free.shape[0],), dtype=np.float32)
+    free_centers, free_occ = _cap_voxels(free, free_occ)
+    unknown = _unknown_display_centers(occupied, free, voxel_size, origin, bounds)
+    unknown_occ = np.ones((unknown.shape[0],), dtype=np.float32)
+    return free_centers, free_occ, unknown, unknown_occ
+
+
+def _unknown_display_centers(
+    occupied: np.ndarray,
+    free: np.ndarray,
+    voxel_size: float,
+    origin: np.ndarray | None,
+    bounds: np.ndarray,
+) -> np.ndarray:
+    size = float(max(voxel_size, 0.05))
+    origin_vec = np.asarray(bounds[:, 0] if origin is None else origin, dtype=np.float64)
+    counts = [max(int(np.floor((hi - lo) / size)), 0) for lo, hi in bounds]
+    nx, ny, nz = counts
+    del nx
+    total = ny * nz * counts[0]
+    if total <= 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    taken = _cell_keys_from_points(occupied, size, origin_vec) | _cell_keys_from_points(
+        free, size, origin_vec
+    )
+    stride = max(total // (MAX_VOXELS * 4), 1)
+    chosen = np.arange(0, total, stride, dtype=np.int64)
+    plane = ny * nz
+    ix = chosen // plane
+    rem = chosen % plane
+    iy = rem // nz
+    iz = rem % nz
+    keep_x: list[int] = []
+    keep_y: list[int] = []
+    keep_z: list[int] = []
+    for x, y, z in zip(ix.tolist(), iy.tolist(), iz.tolist()):
+        if (int(x), int(y), int(z)) not in taken:
+            keep_x.append(int(x))
+            keep_y.append(int(y))
+            keep_z.append(int(z))
+    if not keep_x:
+        return np.zeros((0, 3), dtype=np.float32)
+    xs = np.array(keep_x)
+    ys = np.array(keep_y)
+    zs = np.array(keep_z)
+    if xs.size > MAX_VOXELS:
+        select = np.linspace(0, xs.size - 1, MAX_VOXELS).astype(np.int64)
+        xs, ys, zs = xs[select], ys[select], zs[select]
+    centers = np.column_stack(
+        (
+            origin_vec[0] + (xs.astype(np.float64) + 0.5) * size,
+            origin_vec[1] + (ys.astype(np.float64) + 0.5) * size,
+            origin_vec[2] + (zs.astype(np.float64) + 0.5) * size,
+        )
+    )
+    return centers.astype(np.float32)
+
+
 def clip_to_bounds(points: np.ndarray, bounds: np.ndarray = EGO_BOUNDS) -> np.ndarray:
     pts = np.asarray(points, dtype=np.float64)
     if pts.size == 0:
@@ -688,19 +754,30 @@ def pack_occupancy_pair(
     gt_occupancy: np.ndarray,
     err_centers: np.ndarray | None = None,
     err_occupancy: np.ndarray | None = None,
+    free_centers: np.ndarray | None = None,
+    free_occupancy: np.ndarray | None = None,
+    unknown_centers: np.ndarray | None = None,
+    unknown_occupancy: np.ndarray | None = None,
 ) -> bytes:
-    """Dual-view protocol: uint32 pred, gt, and discrepancy counts, then the grids."""
-    if err_centers is None or err_occupancy is None:
-        err_centers = np.zeros((0, 3), dtype=np.float32)
-        err_occupancy = np.zeros((0,), dtype=np.float32)
-    pred = pack_occupancy(pred_centers, pred_occupancy)
-    gt = pack_occupancy(gt_centers, gt_occupancy)
-    err = pack_occupancy(err_centers, err_occupancy)
-    pred_count = np.frombuffer(pred[:4], dtype=np.uint32)[0]
-    gt_count = np.frombuffer(gt[:4], dtype=np.uint32)[0]
-    err_count = np.frombuffer(err[:4], dtype=np.uint32)[0]
-    header = np.array([pred_count, gt_count, err_count], dtype=np.uint32)
-    return header.tobytes() + pred[4:] + gt[4:] + err[4:]
+    """uint32 pred, gt, discrepancy, free, and unknown counts, then those grids."""
+    blocks = [
+        (pred_centers, pred_occupancy),
+        (gt_centers, gt_occupancy),
+        (err_centers, err_occupancy),
+        (free_centers, free_occupancy),
+        (unknown_centers, unknown_occupancy),
+    ]
+    packed = []
+    counts = []
+    for centers, occupancy in blocks:
+        if centers is None or occupancy is None:
+            centers = np.zeros((0, 3), dtype=np.float32)
+            occupancy = np.zeros((0,), dtype=np.float32)
+        blob = pack_occupancy(centers, occupancy)
+        counts.append(int(np.frombuffer(blob[:4], dtype=np.uint32)[0]))
+        packed.append(blob[4:])
+    header = np.array(counts, dtype=np.uint32)
+    return header.tobytes() + b"".join(packed)
 
 
 def grid_miou(
@@ -992,7 +1069,21 @@ def project_cameras_to_voxel_pair(
     )
     pred_centers, pred_occ = _cap_voxels(pred_centers, pred_occ)
     gt_centers, gt_occ = _cap_voxels(occupied, weights)
+    free_c, free_o, unk_c, unk_o = display_label_clouds(occupied, free, voxel_size, origin=origin)
     size = float(max(voxel_size, 0.05))
     _touch_open3d(pred_centers, size)
     _touch_open3d(gt_centers, size)
-    return pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ, miou, score
+    return (
+        pred_centers,
+        pred_occ,
+        gt_centers,
+        gt_occ,
+        err_centers,
+        err_occ,
+        miou,
+        score,
+        free_c,
+        free_o,
+        unk_c,
+        unk_o,
+    )
