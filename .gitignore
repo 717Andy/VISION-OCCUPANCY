@@ -13,8 +13,9 @@ build/
 *.tar.gz
 /tmp/
 
-# Generated MiDaS depth caches
-backend/data/nuscenes/depth/
+# Generated evaluation documents
+backend/data/runs/*.json
+
 
 # OS & Editor metadata
 .DS_Store

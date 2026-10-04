@@ -1,4 +1,4 @@
-import type { SceneManifest } from './types';
+import type { SavedRun, SavedRunSummary, SceneManifest } from './types';
 
 export const API_BASE = '/api';
 
@@ -17,6 +17,19 @@ export async function fetchManifest(): Promise<SceneManifest | null> {
 export function cameraFrameUrl(frameIndex: number, cameraId: string, cacheBust?: number): string {
   const qs = cacheBust != null ? `?t=${cacheBust}` : '';
   return `${API_BASE}/frames/${frameIndex}/cameras/${encodeURIComponent(cameraId)}${qs}`;
+}
+
+export async function fetchRuns(): Promise<SavedRunSummary[]> {
+  const res = await fetch(`${API_BASE}/runs`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.runs ?? [];
+}
+
+export async function fetchRun(runId: string): Promise<SavedRun | null> {
+  const res = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}`);
+  if (!res.ok) return null;
+  return res.json();
 }
 
 export async function fetchGpuLabel(): Promise<string> {

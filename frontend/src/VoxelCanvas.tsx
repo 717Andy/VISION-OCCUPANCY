@@ -36,6 +36,12 @@ interface VoxelCanvasProps {
   discrepancyColor?: string;
   onDiscrepancyEnabledChange?: (enabled: boolean) => void;
   onDiscrepancyColorChange?: (color: string) => void;
+  freeRef?: MutableRefObject<VoxelData[]>;
+  freeEnabled?: boolean;
+  onFreeEnabledChange?: (enabled: boolean) => void;
+  unknownRef?: MutableRefObject<VoxelData[]>;
+  unknownEnabled?: boolean;
+  onUnknownEnabledChange?: (enabled: boolean) => void;
 }
 
 const MAX_INSTANCES = 900;
@@ -364,6 +370,12 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   discrepancyColor = '#f0883e',
   onDiscrepancyEnabledChange,
   onDiscrepancyColorChange,
+  freeRef,
+  freeEnabled = false,
+  onFreeEnabledChange,
+  unknownRef,
+  unknownEnabled = false,
+  onUnknownEnabledChange,
 }) => {
   const claimRef = useRef<PressClaim | null>(null);
   const layerKey = useMemo(
@@ -397,6 +409,26 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
               value={discrepancyColor}
               onChange={(event) => onDiscrepancyColorChange?.(event.target.value)}
             />
+            {onFreeEnabledChange && (
+              <button
+                type="button"
+                className="discrepancy-btn"
+                aria-pressed={freeEnabled}
+                onClick={() => onFreeEnabledChange(!freeEnabled)}
+              >
+                Free
+              </button>
+            )}
+            {onUnknownEnabledChange && (
+              <button
+                type="button"
+                className="discrepancy-btn"
+                aria-pressed={unknownEnabled}
+                onClick={() => onUnknownEnabledChange(!unknownEnabled)}
+              >
+                Unknown
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -423,6 +455,28 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
               voxelSize={voxelSize}
               enabled={discrepancyEnabled}
               colorHex={discrepancyColor}
+              selected={selected?.voxel ?? null}
+              claimRef={claimRef}
+              onSelect={onSelect}
+            />
+          )}
+          {freeRef && (
+            <DiscrepancyOverlay
+              voxelsRef={freeRef}
+              voxelSize={voxelSize}
+              enabled={freeEnabled}
+              colorHex="#9aa4b2"
+              selected={selected?.voxel ?? null}
+              claimRef={claimRef}
+              onSelect={onSelect}
+            />
+          )}
+          {unknownRef && (
+            <DiscrepancyOverlay
+              voxelsRef={unknownRef}
+              voxelSize={voxelSize}
+              enabled={unknownEnabled}
+              colorHex="#3d4450"
               selected={selected?.voxel ?? null}
               claimRef={claimRef}
               onSelect={onSelect}

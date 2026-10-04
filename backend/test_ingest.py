@@ -70,14 +70,14 @@ class PlaybackOccupancyTests(unittest.TestCase):
         first = pipeline.occupancy_for_frame(0, voxel_size=0.4, threshold=0.1)
         second = pipeline.occupancy_for_frame(1, voxel_size=0.4, threshold=0.1)
         self.assertEqual(pipeline.voxel_source, "midas-open3d")
-        pred_n, gt_n, err_n = struct.unpack_from("<III", first, 0)
+        pred_n, gt_n, err_n, free_n, unk_n = struct.unpack_from("<IIIII", first, 0)
         self.assertGreater(pred_n, 0)
         self.assertGreaterEqual(gt_n, 0)
-        self.assertEqual(len(first), 12 + (pred_n + gt_n + err_n) * 16)
+        self.assertEqual(len(first), 20 + (pred_n + gt_n + err_n + free_n + unk_n) * 16)
         if gt_n:
-            pred = np.frombuffer(first[12 : 12 + pred_n * 16], dtype=np.float32).reshape(pred_n, 4)
+            pred = np.frombuffer(first[20 : 20 + pred_n * 16], dtype=np.float32).reshape(pred_n, 4)
             gt = np.frombuffer(
-                first[12 + pred_n * 16 : 12 + (pred_n + gt_n) * 16], dtype=np.float32
+                first[20 + pred_n * 16 : 20 + (pred_n + gt_n) * 16], dtype=np.float32
             ).reshape(gt_n, 4)
             pred_keys = {tuple(np.round(row[:3], 3)) for row in pred}
             gt_keys = {tuple(np.round(row[:3], 3)) for row in gt}
@@ -90,9 +90,9 @@ class PlaybackOccupancyTests(unittest.TestCase):
     def test_voxels_are_metric_ego_coordinates(self):
         pipeline = PerceptionPipeline(depth_engine=FakeMidasEngine())
         payload = pipeline.occupancy_for_frame(0, voxel_size=0.5, threshold=0.0)
-        pred_n, _gt_n, _err_n = struct.unpack_from("<III", payload, 0)
+        pred_n, _gt_n, _err_n, _free_n, _unk_n = struct.unpack_from("<IIIII", payload, 0)
         self.assertGreater(pred_n, 0)
-        x, y, z, prob = struct.unpack_from("<ffff", payload, 12)
+        x, y, z, prob = struct.unpack_from("<ffff", payload, 20)
         self.assertTrue(math_isfinite(x, y, z, prob))
         self.assertGreaterEqual(prob, 0.0)
         self.assertLessEqual(prob, 1.0)

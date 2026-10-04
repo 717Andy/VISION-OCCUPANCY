@@ -1,5 +1,5 @@
 import React from 'react';
-import type { BenchmarkScore, BenchmarkTable as BenchmarkTableData } from './types';
+import type { BenchmarkScore, BenchmarkTable as BenchmarkTableData, SavedRun, SavedRunSummary } from './types';
 
 function formatCount(value: number): string {
   return Math.round(value).toLocaleString('en-US');
@@ -14,9 +14,22 @@ function heldoutText(label: string, score: BenchmarkScore | undefined): string |
   return `${label} IoU ${formatScore(score.iou)} mIoU ${formatScore(score.miou)}`;
 }
 
-export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({ table }) => {
-  if (!table || table.rows.length === 0) return null;
-  const held = table.heldout;
+function formatCell(value: number | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatCount(value) : '—';
+}
+
+function formatMaybeScore(value: number | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatScore(value) : '—';
+}
+
+export const BenchmarkTable: React.FC<{
+  table: BenchmarkTableData | null;
+  runs?: SavedRunSummary[];
+  selectedRun?: SavedRun | null;
+  onSelectRun?: (id: string) => void;
+}> = ({ table, runs = [], selectedRun = null, onSelectRun }) => {
+  if ((!table || table.rows.length === 0) && runs.length === 0) return null;
+  const held = table?.heldout;
   const heldLine = held
     ? [heldoutText('Monocular', held.monocular), heldoutText('VoxNet', held.voxnet)]
         .filter((part): part is string => Boolean(part))
@@ -26,6 +39,8 @@ export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({
   return (
     <aside className="overlay-card benchmark-card" aria-label="mIoU benchmark">
       <h2>mIoU benchmark</h2>
+      {table && table.rows.length > 0 && (
+        <>
       <p className="bench-meta">
         Frame {table.frame_index} · {table.split} · {table.voxel_m.toFixed(1)} m cells
       </p>
@@ -44,11 +59,11 @@ export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({
           {table.rows.map((row) => (
             <tr key={row.pipeline}>
               <th scope="row">{row.pipeline}</th>
-              <td>{formatCount(row.tp)}</td>
-              <td>{formatCount(row.fp)}</td>
-              <td>{formatCount(row.fn)}</td>
-              <td>{formatScore(row.iou)}</td>
-              <td>{formatScore(row.miou)}</td>
+              <td>{formatCell(row.tp)}</td>
+              <td>{formatCell(row.fp)}</td>
+              <td>{formatCell(row.fn)}</td>
+              <td>{formatMaybeScore(row.iou)}</td>
+              <td>{formatMaybeScore(row.miou)}</td>
             </tr>
           ))}
         </tbody>
@@ -62,6 +77,45 @@ export const BenchmarkTable: React.FC<{ table: BenchmarkTableData | null }> = ({
         <p className="bench-note">
           Held-out micro ({held.frames} frames): {heldLine}
         </p>
+      )}
+        </>
+      )}
+      {runs.length > 0 && (
+        <div className="saved-runs">
+          <p className="bench-note">Saved runs</p>
+          <ul>
+            {runs.map((run) => (
+              <li key={run.id}>
+                <button
+                  type="button"
+                  className={selectedRun?.id === run.id ? 'active' : undefined}
+                  onClick={() => onSelectRun?.(run.id)}
+                >
+                  {run.checkpoint_id ?? run.id}
+                  {run.heldout ? ' · held-out' : run.frame_index != null ? ` · frame ${run.frame_index}` : ''}
+                  {run.rows?.map((row) =>
+                    typeof row.iou === 'number' ? ` · ${row.pipeline} ${row.iou.toFixed(3)}` : '',
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {selectedRun?.frame?.rows && (
+            <table>
+              <tbody>
+                {selectedRun.frame.rows.map((row) => (
+                  <tr key={row.pipeline}>
+                    <th scope="row">{row.pipeline}</th>
+                    <td>{formatCell(row.tp)}</td>
+                    <td>{formatCell(row.fp)}</td>
+                    <td>{formatCell(row.fn)}</td>
+                    <td>{formatMaybeScore(row.iou)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
     </aside>
   );
