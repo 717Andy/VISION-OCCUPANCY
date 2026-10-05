@@ -122,6 +122,23 @@ def eval_heldout(threshold: float = 0.38):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/api/runs")
+def get_runs():
+    from benchmark import list_runs
+
+    return {"runs": list_runs()}
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str):
+    from benchmark import load_run
+
+    try:
+        return load_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/api/telemetry")
 def telemetry():
     scene_name = None

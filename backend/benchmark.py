@@ -7,6 +7,8 @@ does not replace that number.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -163,6 +165,16 @@ def micro_summary(predict: Callable[[int], np.ndarray], frame_ids: list[int]) ->
     }
 
 
+def registered_predictors() -> list[tuple[str, Any, Any]]:
+    """Name, predict(frame, threshold) -> centers, checkpoint id callable."""
+    from voxnet_baseline import checkpoint_id as voxnet_checkpoint_id
+
+    return [
+        (MONOCULAR_NAME, monocular_centers, lambda: "midas-cache"),
+        (VOXNET_NAME, lambda frame, _threshold: predict_centers(frame), voxnet_checkpoint_id),
+    ]
+
+
 def build_frame_benchmark(frame_index: int, threshold: float) -> dict[str, Any]:
     """One-frame comparison of both pipelines against camera-visible lidar."""
     from voxnet_baseline import checkpoint_id
@@ -170,13 +182,14 @@ def build_frame_benchmark(frame_index: int, threshold: float) -> dict[str, Any]:
     index = int(frame_index)
     occupied, free = known_grids_for_frame(index)
     rows: list[dict[str, Any]] = []
-    try:
-        mono = monocular_centers(index, float(threshold))
-        rows.append(score_prediction(MONOCULAR_NAME, mono, occupied, free))
-    except FileNotFoundError as exc:
-        rows.append({"pipeline": MONOCULAR_NAME, "error": str(exc)})
-    voxnet = predict_centers(index)
-    rows.append(score_prediction(VOXNET_NAME, voxnet, occupied, free))
+    for name, predict, identity in registered_predictors():
+        try:
+            centers = predict(index, float(threshold))
+            row = score_prediction(name, centers, occupied, free)
+            row["checkpoint_id"] = identity()
+            rows.append(row)
+        except FileNotFoundError as exc:
+            rows.append({"pipeline": name, "error": str(exc)})
     runtime = load_baseline()
     heldout = runtime.get("heldout")
     return {
@@ -229,6 +242,62 @@ def evaluation_document(
     return document
 
 
+RUNS_DIR = Path(__file__).resolve().parent / "data" / "runs"
+
+
+def save_run(document: dict[str, Any]) -> dict[str, Any]:
+    """Write one evaluation document and return it with an id."""
+    from datetime import datetime, timezone
+
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    checkpoint = str(document.get("checkpoint_id") or "none")
+    run_id = f"{stamp}_{checkpoint}"
+    stored = {"id": run_id, **document}
+    (RUNS_DIR / f"{run_id}.json").write_text(json.dumps(stored))
+    return stored
+
+
+def list_runs() -> list[dict[str, Any]]:
+    if not RUNS_DIR.is_dir():
+        return []
+    summaries = []
+    for path in sorted(RUNS_DIR.glob("*.json"), reverse=True):
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        frame = data.get("frame") or {}
+        summaries.append(
+            {
+                "id": data.get("id", path.stem),
+                "scene_name": data.get("scene_name"),
+                "checkpoint_id": data.get("checkpoint_id"),
+                "heldout": "frames" in data and "frame" not in data,
+                "frame_index": frame.get("frame_index"),
+                "rows": [
+                    {
+                        "pipeline": row.get("pipeline"),
+                        "iou": row.get("iou"),
+                        "tp": row.get("tp"),
+                        "fp": row.get("fp"),
+                        "fn": row.get("fn"),
+                    }
+                    for row in frame.get("rows", [])
+                    if isinstance(row, dict)
+                ],
+            }
+        )
+    return summaries
+
+
+def load_run(run_id: str) -> dict[str, Any]:
+    path = RUNS_DIR / f"{run_id}.json"
+    if not path.is_file():
+        raise FileNotFoundError(run_id)
+    return json.loads(path.read_text())
+
+
 def main() -> None:
     import argparse
     import json
@@ -238,7 +307,10 @@ def main() -> None:
     parser.add_argument("--heldout", action="store_true")
     parser.add_argument("--threshold", type=float, default=0.38)
     args = parser.parse_args()
-    print(json.dumps(evaluation_document(args.frame, args.heldout, args.threshold), indent=2))
+    document = evaluation_document(args.frame, args.heldout, args.threshold)
+    saved = save_run(document)
+    document["run_id"] = saved["id"]
+    print(json.dumps(document, indent=2))
 
 
 if __name__ == "__main__":

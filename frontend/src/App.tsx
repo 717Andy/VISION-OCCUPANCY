@@ -6,10 +6,12 @@ import { PlaybackBar } from './PlaybackBar';
 import { TopBar } from './TopBar';
 import { InspectionPanel } from './InspectionPanel';
 import { BenchmarkTable } from './BenchmarkTable';
-import { fetchGpuLabel, fetchManifest, wsUrl } from './api';
+import { fetchGpuLabel, fetchManifest, fetchRun, fetchRuns, wsUrl } from './api';
 import type {
   BenchmarkTable as BenchmarkTableData,
   ControlsState,
+  SavedRun,
+  SavedRunSummary,
   SceneManifest,
   SelectedVoxel,
   SemanticClass,
@@ -106,10 +108,16 @@ export const App: React.FC = () => {
   const [discrepancyOn, setDiscrepancyOn] = useState(false);
   const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
   const [benchmark, setBenchmark] = useState<BenchmarkTableData | null>(null);
+  const [runs, setRuns] = useState<SavedRunSummary[]>([]);
+  const [selectedRun, setSelectedRun] = useState<SavedRun | null>(null);
+  const [freeOn, setFreeOn] = useState(false);
+  const [unknownOn, setUnknownOn] = useState(false);
 
   const predVoxelsRef = useRef<VoxelData[]>([]);
   const gtVoxelsRef = useRef<VoxelData[]>([]);
   const errorVoxelsRef = useRef<VoxelData[]>([]);
+  const freeVoxelsRef = useRef<VoxelData[]>([]);
+  const unknownVoxelsRef = useRef<VoxelData[]>([]);
   const orbitRef = useRef(createSharedOrbit());
   const wsRef = useRef<WebSocket | null>(null);
   const pendingFrameRef = useRef<ArrayBuffer | null>(null);
@@ -144,6 +152,7 @@ export const App: React.FC = () => {
       })
       .catch((err) => console.warn('nuScenes manifest unavailable', err));
     fetchGpuLabel().then(setGpu);
+    fetchRuns().then(setRuns);
   }, []);
 
   useEffect(() => {
@@ -173,21 +182,34 @@ export const App: React.FC = () => {
     };
 
     const consumeFrame = (buffer: ArrayBuffer) => {
-      if (buffer.byteLength < 12) return;
-      const header = new Uint32Array(buffer, 0, 3);
+      if (buffer.byteLength < 20) return;
+      const header = new Uint32Array(buffer, 0, 5);
       const predCount = header[0];
       const gtCount = header[1];
       const errCount = header[2];
+      const freeCount = header[3];
+      const unknownCount = header[4];
       const predBytes = predCount * 16;
       const gtBytes = gtCount * 16;
       const errBytes = errCount * 16;
-      if (buffer.byteLength < 12 + predBytes + gtBytes + errBytes) return;
-      const predFloats = new Float32Array(buffer, 12, predCount * 4);
-      const gtFloats = new Float32Array(buffer, 12 + predBytes, gtCount * 4);
-      const errFloats = new Float32Array(buffer, 12 + predBytes + gtBytes, errCount * 4);
+      const freeBytes = freeCount * 16;
+      const unknownBytes = unknownCount * 16;
+      if (buffer.byteLength < 20 + predBytes + gtBytes + errBytes + freeBytes + unknownBytes) return;
+      let offset = 20;
+      const predFloats = new Float32Array(buffer, offset, predCount * 4);
+      offset += predBytes;
+      const gtFloats = new Float32Array(buffer, offset, gtCount * 4);
+      offset += gtBytes;
+      const errFloats = new Float32Array(buffer, offset, errCount * 4);
+      offset += errBytes;
+      const freeFloats = new Float32Array(buffer, offset, freeCount * 4);
+      offset += freeBytes;
+      const unknownFloats = new Float32Array(buffer, offset, unknownCount * 4);
       predVoxelsRef.current = decodeVoxels(predFloats, predCount);
       gtVoxelsRef.current = decodeVoxels(gtFloats, gtCount);
       errorVoxelsRef.current = decodeVoxels(errFloats, errCount);
+      freeVoxelsRef.current = decodeVoxels(freeFloats, freeCount);
+      unknownVoxelsRef.current = decodeVoxels(unknownFloats, unknownCount);
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -303,6 +325,10 @@ export const App: React.FC = () => {
     });
   }, [manifest]);
 
+  const handleSelectRun = useCallback((runId: string) => {
+    fetchRun(runId).then(setSelectedRun);
+  }, []);
+
   const highlightCamera = selected
     ? camerasSeeingPoint(
         selected.voxel,
@@ -369,6 +395,12 @@ export const App: React.FC = () => {
           discrepancyColor={discrepancyColor}
           onDiscrepancyEnabledChange={setDiscrepancyOn}
           onDiscrepancyColorChange={setDiscrepancyColor}
+          freeRef={freeVoxelsRef}
+          freeEnabled={freeOn}
+          onFreeEnabledChange={setFreeOn}
+          unknownRef={unknownVoxelsRef}
+          unknownEnabled={unknownOn}
+          onUnknownEnabledChange={setUnknownOn}
         />
         {settingsOpen && (
           <ControlPanel
@@ -380,7 +412,12 @@ export const App: React.FC = () => {
         {selected && !settingsOpen && (
           <InspectionPanel selected={selected} onClose={() => setSelected(null)} />
         )}
-        <BenchmarkTable table={benchmark} />
+        <BenchmarkTable
+          table={benchmark}
+          runs={runs.filter((run) => !manifest?.scene_name || run.scene_name === manifest.scene_name)}
+          selectedRun={selectedRun}
+          onSelectRun={handleSelectRun}
+        />
       </div>
 
       <PlaybackBar

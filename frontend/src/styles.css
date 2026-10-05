@@ -390,6 +390,27 @@ html, body, #root {
   font-weight: 600;
 }
 
+.saved-runs ul {
+  list-style: none;
+  margin-top: 6px;
+}
+
+.saved-runs button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.saved-runs button.active {
+  color: var(--text);
+}
+
 .card-head {
   display: flex;
   align-items: center;

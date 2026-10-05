@@ -17,6 +17,7 @@ from projection import (
     EGO_BOUNDS,
     camera_known_space,
     discrepancy_voxels,
+    display_label_clouds,
     known_space_counts,
     known_space_error_voxels,
     pack_occupancy,
@@ -181,7 +182,21 @@ class PerceptionPipeline:
                 pred_centers, occupied, free, voxel_size, origin=EGO_BOUNDS[:, 0]
             )
         gt_centers, gt_occ = _cap_voxels(occupied, weights)
-        return pack_occupancy_pair(pred_centers, pred_occ, gt_centers, gt_occ, err_centers, err_occ)
+        free_c, free_o, unk_c, unk_o = display_label_clouds(
+            occupied, free, voxel_size, origin=EGO_BOUNDS[:, 0]
+        )
+        return pack_occupancy_pair(
+            pred_centers,
+            pred_occ,
+            gt_centers,
+            gt_occ,
+            err_centers,
+            err_occ,
+            free_c,
+            free_o,
+            unk_c,
+            unk_o,
+        )
 
     def generate_occupancy_pair(
         self,
@@ -295,17 +310,21 @@ class PerceptionPipeline:
             )
 
         start = time.perf_counter()
-        pred_c, pred_o, gt_c, gt_o, err_c, err_o, _miou, score = project_cameras_to_voxel_pair(
-            payloads,
-            load_lidar_ego_points(frame_index),
-            voxel_size,
-            threshold,
+        pred_c, pred_o, gt_c, gt_o, err_c, err_o, _miou, score, free_c, free_o, unk_c, unk_o = (
+            project_cameras_to_voxel_pair(
+                payloads,
+                load_lidar_ego_points(frame_index),
+                voxel_size,
+                threshold,
+            )
         )
         self.last_project_ms = (time.perf_counter() - start) * 1000.0
         self.last_depth_ms = depth_ms
         self._store_score(score, voxel_size, unlabeled_is_free=False)
         self.gt_source = "lidar-visible" if gt_c.shape[0] else "unavailable"
-        return pack_occupancy_pair(pred_c, pred_o, gt_c, gt_o, err_c, err_o)
+        return pack_occupancy_pair(
+            pred_c, pred_o, gt_c, gt_o, err_c, err_o, free_c, free_o, unk_c, unk_o
+        )
 
     def warmup(self) -> None:
         """Load MiDaS, touch Open3D, and cache depth for frame 0."""

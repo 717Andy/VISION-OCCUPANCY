@@ -101,6 +101,24 @@ export interface DistanceZone {
   error: number | null;
 }
 
+export interface SavedRunSummary {
+  id: string;
+  scene_name?: string;
+  checkpoint_id?: string;
+  heldout?: boolean;
+  frame_index?: number;
+  rows?: { pipeline?: string; iou?: number; tp?: number; fp?: number; fn?: number }[];
+}
+
+export interface SavedRun {
+  id: string;
+  scene_name?: string;
+  checkpoint_id?: string;
+  scoring?: string;
+  frame?: BenchmarkTable;
+  frames?: BenchmarkTable[];
+}
+
 export interface SelectedVoxel {
   voxel: VoxelData;
   meters: { x: number; y: number; z: number };
