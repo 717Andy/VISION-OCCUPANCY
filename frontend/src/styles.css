@@ -105,11 +105,34 @@ html, body, #root {
 
 .hud {
   flex: 1 1 auto;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
   font-size: 18px;
-  white-space: nowrap;
+}
+
+.hud-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.range-chart {
+  flex: 0 0 auto;
+}
+
+.range-axis {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1;
+}
+
+.range-label {
+  fill: rgba(255, 255, 255, 0.75);
+  font-size: 8px;
+  font-family: var(--font-ui);
 }
 
 .workspace {

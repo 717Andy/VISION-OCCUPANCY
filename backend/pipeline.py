@@ -101,7 +101,35 @@ class PerceptionPipeline:
             "tolerance_cells": int(score["tolerance_cells"]),
             "unknown": "ignored" if not unlabeled_is_free else "treated_as_free",
             "bands": score["bands"],
+            "distance_zones": score.get("distance_zones") or [],
+            "miou_drop": score.get("miou_drop") or {},
         }
+        self._log_distance_decay()
+
+    def _log_distance_decay(self) -> None:
+        metric = self.last_metric or {}
+        zones = metric.get("distance_zones") or []
+        if not zones:
+            return
+        parts = []
+        for zone in zones:
+            miou = zone.get("miou")
+            if miou is None:
+                parts.append(f"{zone.get('zone')} n/a")
+            else:
+                parts.append(f"{zone.get('zone')} {float(miou):.3f}")
+        drop = metric.get("miou_drop") or {}
+
+        def fmt(value: object) -> str:
+            return "n/a" if value is None else f"{float(value):.3f}"
+
+        logger.info(
+            "mIoU by range %s | drop near→mid %s mid→far %s near→far %s",
+            " ".join(parts),
+            fmt(drop.get("near_to_mid")),
+            fmt(drop.get("mid_to_far")),
+            fmt(drop.get("near_to_far")),
+        )
 
     def _record_known_score(
         self,

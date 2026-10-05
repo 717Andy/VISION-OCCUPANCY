@@ -94,6 +94,13 @@ export interface BenchmarkTable {
   } | null;
 }
 
+export interface DistanceZone {
+  zone: string;
+  label: string;
+  miou: number | null;
+  error: number | null;
+}
+
 export interface SelectedVoxel {
   voxel: VoxelData;
   meters: { x: number; y: number; z: number };
