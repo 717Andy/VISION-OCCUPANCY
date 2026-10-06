@@ -486,6 +486,9 @@ def known_space_counts(
         band_ious.append(iou)
         bands.append({"band": label, "tp": tp, "fp": fp, "fn": fn, "iou": iou})
 
+    distance_zones, miou_drop = _distance_decay(
+        true_positive_keys, false_positive_keys, false_negative_keys, origin_vec, size
+    )
     return {
         "tp": len(true_positive_keys),
         "fp": len(false_positive_keys),
@@ -493,9 +496,87 @@ def known_space_counts(
         "iou": binary,
         "miou": float(sum(band_ious) / len(band_ious)) if band_ious else binary,
         "bands": bands,
+        "distance_zones": distance_zones,
+        "miou_drop": miou_drop,
         "tolerance_cells": radius,
         "grid_m": size,
         "unknown": "ignored",
+    }
+
+
+def _horizontal_range(key: tuple[int, int, int], origin: np.ndarray, voxel_size: float) -> float:
+    x = float(origin[0] + (key[0] + 0.5) * voxel_size)
+    y = float(origin[1] + (key[1] + 0.5) * voxel_size)
+    return float(np.hypot(x, y))
+
+
+def _zone_miou(
+    true_positive: set[tuple[int, int, int]],
+    false_positive: set[tuple[int, int, int]],
+    false_negative: set[tuple[int, int, int]],
+    origin: np.ndarray,
+    voxel_size: float,
+) -> float | None:
+    if not true_positive and not false_positive and not false_negative:
+        return None
+    ious: list[float] = []
+    for _label, class_name in HEIGHT_BANDS:
+        def in_band(key: tuple[int, int, int], name: str = class_name) -> bool:
+            return _class_of_key(key, origin, voxel_size) == name
+
+        tp = sum(1 for key in true_positive if in_band(key))
+        fp = sum(1 for key in false_positive if in_band(key))
+        fn = sum(1 for key in false_negative if in_band(key))
+        if tp + fp + fn:
+            ious.append(_iou_from_counts(tp, fp, fn))
+    if not ious:
+        return _iou_from_counts(len(true_positive), len(false_positive), len(false_negative))
+    return float(sum(ious) / len(ious))
+
+
+def _distance_decay(
+    true_positive: set[tuple[int, int, int]],
+    false_positive: set[tuple[int, int, int]],
+    false_negative: set[tuple[int, int, int]],
+    origin: np.ndarray,
+    voxel_size: float,
+) -> tuple[list[dict[str, Any]], dict[str, float | None]]:
+    """Height-band mIoU inside 0–10 m, 10–25 m, and 25 m+, plus the drop between them."""
+    zones: list[dict[str, Any]] = []
+    by_zone: dict[str, float | None] = {}
+    for name, label, low, high in DISTANCE_ZONES:
+        def in_zone(key: tuple[int, int, int], lo: float = low, hi: float = high) -> bool:
+            distance = _horizontal_range(key, origin, voxel_size)
+            return lo <= distance < hi
+
+        tp = {key for key in true_positive if in_zone(key)}
+        fp = {key for key in false_positive if in_zone(key)}
+        fn = {key for key in false_negative if in_zone(key)}
+        miou = _zone_miou(tp, fp, fn, origin, voxel_size)
+        zones.append(
+            {
+                "zone": name,
+                "label": label,
+                "tp": len(tp),
+                "fp": len(fp),
+                "fn": len(fn),
+                "miou": miou,
+                "error": None if miou is None else float(1.0 - miou),
+            }
+        )
+        by_zone[name] = miou
+
+    def drop(start: str, end: str) -> float | None:
+        left = by_zone[start]
+        right = by_zone[end]
+        if left is None or right is None:
+            return None
+        return float(left - right)
+
+    return zones, {
+        "near_to_mid": drop("near", "mid"),
+        "mid_to_far": drop("mid", "far"),
+        "near_to_far": drop("near", "far"),
     }
 
 
@@ -847,6 +928,12 @@ HEIGHT_BANDS = (
     ("below 0.45 m", "driveable"),
     ("0.45 to 2.3 m", "vehicle"),
     ("above 2.3 m", "pedestrian"),
+)
+# Horizontal range from the ego origin. 10 m belongs to mid, 25 m belongs to far.
+DISTANCE_ZONES = (
+    ("near", "0–10 m", 0.0, 10.0),
+    ("mid", "10–25 m", 10.0, 25.0),
+    ("far", "25 m+", 25.0, float("inf")),
 )
 
 

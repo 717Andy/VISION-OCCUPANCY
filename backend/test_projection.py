@@ -339,6 +339,32 @@ class VoxelizationTests(unittest.TestCase):
         self.assertEqual(ignored["fn"], occupied.shape[0])
         self.assertTrue(all("band" in row for row in ignored["bands"]))
 
+    def test_distance_decay_logs_miou_drop_across_three_ranges(self):
+        origin = np.zeros(3)
+        occupied = np.array(
+            [[5.0, 0.0, 0.2], [15.0, 0.0, 0.2], [30.0, 0.0, 0.2]],
+            dtype=np.float32,
+        )
+        predicted = np.array([[5.0, 0.0, 0.2]], dtype=np.float32)
+        counts = known_space_counts(
+            predicted,
+            occupied,
+            np.zeros((0, 3), dtype=np.float32),
+            1.0,
+            origin=origin,
+            unlabeled_is_free=True,
+        )
+        by_zone = {row["zone"]: row for row in counts["distance_zones"]}
+        self.assertEqual(list(by_zone), ["near", "mid", "far"])
+        self.assertAlmostEqual(by_zone["near"]["miou"], 1.0)
+        self.assertAlmostEqual(by_zone["mid"]["miou"], 0.0)
+        self.assertAlmostEqual(by_zone["far"]["miou"], 0.0)
+        self.assertAlmostEqual(by_zone["near"]["error"], 0.0)
+        self.assertAlmostEqual(by_zone["far"]["error"], 1.0)
+        self.assertAlmostEqual(counts["miou_drop"]["near_to_mid"], 1.0)
+        self.assertAlmostEqual(counts["miou_drop"]["mid_to_far"], 0.0)
+        self.assertAlmostEqual(counts["miou_drop"]["near_to_far"], 1.0)
+
     def test_unknown_display_skips_occupied_and_free_cells(self):
         bounds = np.array([[0.0, 4.0], [0.0, 4.0], [0.0, 4.0]], dtype=np.float64)
         occupied = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)

@@ -15,6 +15,7 @@ import type {
   SceneManifest,
   SelectedVoxel,
   SemanticClass,
+  DistanceZone,
   ViewMode,
   VoxelData,
 } from './types';
@@ -103,6 +104,7 @@ export const App: React.FC = () => {
   const [playing, setPlaying] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('single');
   const [miou, setMiou] = useState('—');
+  const [distanceZones, setDistanceZones] = useState<DistanceZone[]>([]);
   const [discrepancyOn, setDiscrepancyOn] = useState(false);
   const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
   const [benchmark, setBenchmark] = useState<BenchmarkTableData | null>(null);
@@ -226,6 +228,7 @@ export const App: React.FC = () => {
               tolerance_cells?: number;
               unknown?: string;
               iou?: number;
+              distance_zones?: DistanceZone[];
             };
             benchmark?: BenchmarkTableData | null;
           };
@@ -242,6 +245,7 @@ export const App: React.FC = () => {
               const tol = msg.metric.tolerance_cells ?? 1;
               const unknown = msg.metric.unknown === 'ignored' ? 'unknown ignored' : 'unknown as free';
               setMiou(`${msg.metric.iou.toFixed(2)} (${grid} m, tol ${tol}, ${unknown})`);
+              setDistanceZones(Array.isArray(msg.metric.distance_zones) ? msg.metric.distance_zones : []);
             } else if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
               setMiou(msg.miou.toFixed(2));
             }
@@ -344,6 +348,7 @@ export const App: React.FC = () => {
         fps={fps}
         latencyMs={latencyMs}
         miou={miou}
+        distanceZones={distanceZones}
         gpu={gpu}
         viewMode={viewMode}
         onViewModeChange={setViewMode}

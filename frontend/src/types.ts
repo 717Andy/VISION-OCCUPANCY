@@ -94,6 +94,13 @@ export interface BenchmarkTable {
   } | null;
 }
 
+export interface DistanceZone {
+  zone: string;
+  label: string;
+  miou: number | null;
+  error: number | null;
+}
+
 export interface SavedRunSummary {
   id: string;
   scene_name?: string;

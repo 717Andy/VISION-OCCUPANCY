@@ -124,6 +124,8 @@ def score_prediction(
             }
             for row in counts["bands"]
         ],
+        "distance_zones": counts.get("distance_zones") or [],
+        "miou_drop": counts.get("miou_drop") or {},
     }
 
 
