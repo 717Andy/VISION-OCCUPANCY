@@ -28,7 +28,6 @@ export const BenchmarkTable: React.FC<{
   selectedRun?: SavedRun | null;
   onSelectRun?: (id: string) => void;
 }> = ({ table, runs = [], selectedRun = null, onSelectRun }) => {
-  if ((!table || table.rows.length === 0) && runs.length === 0) return null;
   const held = table?.heldout;
   const heldLine = held
     ? [heldoutText('Monocular', held.monocular), heldoutText('VoxNet', held.voxnet)]
@@ -39,6 +38,9 @@ export const BenchmarkTable: React.FC<{
   return (
     <aside className="overlay-card benchmark-card" aria-label="mIoU benchmark">
       <h2>mIoU benchmark</h2>
+      {(!table || table.rows.length === 0) && runs.length === 0 && (
+        <p className="bench-note">The 1.0 m comparison is not ready yet.</p>
+      )}
       {table && table.rows.length > 0 && (
         <>
       <p className="bench-meta">

@@ -121,18 +121,35 @@ html, body, #root {
 }
 
 .range-chart {
-  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  display: block;
 }
 
-.range-axis {
-  stroke: rgba(255, 255, 255, 0.35);
+.range-grid {
+  stroke: rgba(255, 255, 255, 0.16);
   stroke-width: 1;
 }
 
-.range-label {
-  fill: rgba(255, 255, 255, 0.75);
-  font-size: 8px;
+.range-label,
+.range-value,
+.range-sublabel {
+  fill: rgba(255, 255, 255, 0.82);
   font-family: var(--font-ui);
+}
+
+.range-label {
+  font-size: 12px;
+}
+
+.range-value {
+  font-size: 12px;
+  fill: #f0883e;
+}
+
+.range-sublabel {
+  font-size: 11px;
+  fill: rgba(255, 255, 255, 0.62);
 }
 
 .workspace {
@@ -345,14 +362,78 @@ html, body, #root {
   padding: 14px 18px 22px;
 }
 
-.benchmark-card {
+.corner-dock {
+  position: absolute;
   right: 12px;
   bottom: 12px;
-  width: min(560px, calc(100% - 24px));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}
+
+.corner-panels,
+.corner-actions {
+  pointer-events: auto;
+}
+
+.corner-panels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.corner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.dock-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-90);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.dock-btn[aria-pressed='true'] {
+  background: rgba(240, 136, 62, 0.22);
+  border-color: #f0883e;
+  color: #f0883e;
+}
+
+.corner-dock .overlay-card {
+  position: relative;
+  right: auto;
+  bottom: auto;
+}
+
+.benchmark-card {
+  width: min(560px, calc(100vw - 80px));
+  max-height: min(420px, 58vh);
+  overflow: auto;
   padding: 12px 14px 14px;
   color: var(--text);
 }
 
+.range-card {
+  width: min(440px, calc(100vw - 80px));
+  padding: 12px 14px 14px;
+  color: var(--text);
+}
+
+.range-card h2,
 .benchmark-card h2 {
   font-size: 16px;
   font-weight: 600;
@@ -360,7 +441,8 @@ html, body, #root {
 }
 
 .benchmark-card .bench-meta,
-.benchmark-card .bench-note {
+.benchmark-card .bench-note,
+.range-card .bench-note {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
