@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { cameraFrameUrl } from './api';
 import type { SceneManifest } from './types';
 import settingsIcon from './assets/settings.svg';
@@ -43,6 +43,29 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const frame = manifest?.frames[frameIndex];
   const frameCount = manifest?.frame_count ?? 0;
   const timeS = frame?.time_s ?? 0;
+  const [expanded, setExpanded] = useState<{ id: string; width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpanded(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expanded]);
+
+  const expandedCam = expanded ? LAYOUT.find((cam) => cam.id === expanded.id) : undefined;
+
+  const openCamera = (id: string, tile: HTMLElement) => {
+    const rect = tile.getBoundingClientRect();
+    const margin = 32;
+    let width = rect.width * 2;
+    let height = rect.height * 2;
+    const fit = Math.min(1, (window.innerWidth - margin) / width, (window.innerHeight - margin) / height);
+    width *= fit;
+    height *= fit;
+    setExpanded({ id, width, height });
+  };
 
   return (
     <section className="pane pane-camera">
@@ -72,8 +95,18 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             const camTs = frame?.calibration?.[cam.id]?.timestamp;
             return (
               <article
-                key={`${cam.id}-${frameIndex}`}
+                key={cam.id}
                 className={`cam-tile ${cam.className} ${highlightCamera === cam.id ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-expanded={expanded?.id === cam.id}
+                aria-label={`Expand ${cam.fallback}`}
+                onClick={(event) => openCamera(cam.id, event.currentTarget)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  openCamera(cam.id, event.currentTarget);
+                }}
               >
                 {path ? (
                   <img
@@ -94,6 +127,33 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             );
           })}
         </div>
+        {expanded && expandedCam && (
+          <div className="cam-popup-backdrop" onClick={() => setExpanded(null)}>
+            <article
+              className="cam-popup"
+              style={{ width: expanded.width, height: expanded.height }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {frame?.cameras[expandedCam.id] ? (
+                <img
+                  src={cameraFrameUrl(frameIndex, expandedCam.id)}
+                  alt={`${expandedCam.fallback} enlarged`}
+                  draggable={false}
+                />
+              ) : (
+                <div className="cam-placeholder" />
+              )}
+              <span className="cam-label">
+                {expandedCam.fallback}
+                {frame?.calibration?.[expandedCam.id]?.timestamp != null && frame?.timestamp != null && (
+                  <span className="cam-ts">
+                    {formatCamOffset(frame.timestamp, frame.calibration[expandedCam.id].timestamp)}
+                  </span>
+                )}
+              </span>
+            </article>
+          </div>
+        )}
         {!manifest && (
           <p className="status-note" style={{ position: 'absolute', bottom: 8, width: '100%' }}>
             Waiting for nuScenes clip…
