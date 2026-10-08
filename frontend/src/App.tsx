@@ -5,7 +5,7 @@ import { CameraFeed } from './CameraFeed';
 import { PlaybackBar } from './PlaybackBar';
 import { TopBar } from './TopBar';
 import { InspectionPanel } from './InspectionPanel';
-import { BenchmarkTable } from './BenchmarkTable';
+import { CornerDock } from './CornerDock';
 import { fetchGpuLabel, fetchManifest, fetchRun, fetchRuns, wsUrl } from './api';
 import type {
   BenchmarkTable as BenchmarkTableData,
@@ -16,6 +16,7 @@ import type {
   SelectedVoxel,
   SemanticClass,
   DistanceZone,
+  MiouDrop,
   ViewMode,
   VoxelData,
 } from './types';
@@ -105,6 +106,7 @@ export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('single');
   const [miou, setMiou] = useState('—');
   const [distanceZones, setDistanceZones] = useState<DistanceZone[]>([]);
+  const [miouDrop, setMiouDrop] = useState<MiouDrop>({});
   const [discrepancyOn, setDiscrepancyOn] = useState(false);
   const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
   const [benchmark, setBenchmark] = useState<BenchmarkTableData | null>(null);
@@ -229,6 +231,7 @@ export const App: React.FC = () => {
               unknown?: string;
               iou?: number;
               distance_zones?: DistanceZone[];
+              miou_drop?: MiouDrop;
             };
             benchmark?: BenchmarkTableData | null;
           };
@@ -246,6 +249,7 @@ export const App: React.FC = () => {
               const unknown = msg.metric.unknown === 'ignored' ? 'unknown ignored' : 'unknown as free';
               setMiou(`${msg.metric.iou.toFixed(2)} (${grid} m, tol ${tol}, ${unknown})`);
               setDistanceZones(Array.isArray(msg.metric.distance_zones) ? msg.metric.distance_zones : []);
+              setMiouDrop(msg.metric.miou_drop ?? {});
             } else if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
               setMiou(msg.miou.toFixed(2));
             }
@@ -348,7 +352,6 @@ export const App: React.FC = () => {
         fps={fps}
         latencyMs={latencyMs}
         miou={miou}
-        distanceZones={distanceZones}
         gpu={gpu}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -412,11 +415,13 @@ export const App: React.FC = () => {
         {selected && !settingsOpen && (
           <InspectionPanel selected={selected} onClose={() => setSelected(null)} />
         )}
-        <BenchmarkTable
+        <CornerDock
           table={benchmark}
           runs={runs.filter((run) => !manifest?.scene_name || run.scene_name === manifest.scene_name)}
           selectedRun={selectedRun}
           onSelectRun={handleSelectRun}
+          distanceZones={distanceZones}
+          miouDrop={miouDrop}
         />
       </div>
 

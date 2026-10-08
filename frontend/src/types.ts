@@ -101,6 +101,12 @@ export interface DistanceZone {
   error: number | null;
 }
 
+export interface MiouDrop {
+  near_to_mid?: number | null;
+  mid_to_far?: number | null;
+  near_to_far?: number | null;
+}
+
 export interface SavedRunSummary {
   id: string;
   scene_name?: string;
