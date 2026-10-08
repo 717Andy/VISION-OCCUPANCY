@@ -14,11 +14,11 @@ function formatDrop(value: number | null | undefined): string {
 
 function DistanceErrorChart({ zones }: { zones: DistanceZone[] }) {
   const width = 400;
-  const height = 220;
-  const left = 36;
-  const right = 16;
-  const top = 22;
-  const bottom = 46;
+  const height = 90;
+  const left = 32;
+  const right = 10;
+  const top = 14;
+  const bottom = 28;
   const innerWidth = width - left - right;
   const innerHeight = height - top - bottom;
   const points = zones.map((zone, index) => {
@@ -65,7 +65,12 @@ function DistanceErrorChart({ zones }: { zones: DistanceZone[] }) {
         point ? (
           <g key={zones[index].zone}>
             <circle cx={point.x} cy={point.y} r="4.5" fill="#f0883e" />
-            <text x={point.x} y={point.y - 10} textAnchor="middle" className="range-value">
+            <text
+              x={index === zones.length - 1 ? point.x + 6 : point.x}
+              y={point.y - 8}
+              textAnchor={index === zones.length - 1 ? 'end' : 'middle'}
+              className="range-value"
+            >
               {point.error.toFixed(2)}
             </text>
           </g>
@@ -73,14 +78,16 @@ function DistanceErrorChart({ zones }: { zones: DistanceZone[] }) {
       )}
       {zones.map((zone, index) => {
         const x = left + (index * innerWidth) / Math.max(zones.length - 1, 1);
+        const anchor = index === 0 ? 'start' : index === zones.length - 1 ? 'end' : 'middle';
+        const labelX = index === 0 ? left : index === zones.length - 1 ? width - right : x;
         const miou =
           typeof zone.miou === 'number' && Number.isFinite(zone.miou) ? zone.miou.toFixed(3) : '—';
         return (
           <g key={zone.zone}>
-            <text x={x} y={height - 22} textAnchor="middle" className="range-label">
+            <text x={labelX} y={height - 14} textAnchor={anchor} className="range-label">
               {zone.label}
             </text>
-            <text x={x} y={height - 6} textAnchor="middle" className="range-sublabel">
+            <text x={labelX} y={height - 2} textAnchor={anchor} className="range-sublabel">
               mIoU {miou}
             </text>
           </g>
@@ -146,7 +153,9 @@ export const CornerDock: React.FC<{
               ) : (
                 <>
                   <p className="bench-note">Error = 1 − height-band mIoU. Higher on the chart is a larger miss.</p>
-                  <DistanceErrorChart zones={distanceZones} />
+                  <div className="range-plot">
+                    <DistanceErrorChart zones={distanceZones} />
+                  </div>
                   <p className="bench-note">
                     mIoU drop {formatDrop(miouDrop.near_to_mid)} from 0–10 m to 10–25 m,{' '}
                     {formatDrop(miouDrop.mid_to_far)} from 10–25 m to 25 m+,{' '}

@@ -139,16 +139,16 @@ html, body, #root {
 }
 
 .range-label {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .range-value {
-  font-size: 12px;
+  font-size: 11px;
   fill: #f0883e;
 }
 
 .range-sublabel {
-  font-size: 11px;
+  font-size: 10px;
   fill: rgba(255, 255, 255, 0.62);
 }
 
@@ -384,7 +384,7 @@ html, body, #root {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 8px;
   max-width: 100%;
 }
@@ -428,9 +428,23 @@ html, body, #root {
 }
 
 .range-card {
+  display: flex;
+  flex-direction: column;
   width: min(440px, calc(100vw - 80px));
   padding: 12px 14px 14px;
   color: var(--text);
+}
+
+.range-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.range-plot .range-chart {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 400 / 90;
 }
 
 .range-card h2,
