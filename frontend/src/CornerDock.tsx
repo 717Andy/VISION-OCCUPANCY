@@ -129,7 +129,8 @@ export const CornerDock: React.FC<{
   onSelectRun: (id: string) => void;
   distanceZones: DistanceZone[];
   miouDrop: MiouDrop;
-}> = ({ table, runs, selectedRun, onSelectRun, distanceZones, miouDrop }) => {
+  viewingModel: string;
+}> = ({ table, runs, selectedRun, onSelectRun, distanceZones, miouDrop, viewingModel }) => {
   const [benchmarkOpen, setBenchmarkOpen] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
 
@@ -143,6 +144,7 @@ export const CornerDock: React.FC<{
               runs={runs}
               selectedRun={selectedRun}
               onSelectRun={onSelectRun}
+              viewingModel={viewingModel}
             />
           )}
           {chartOpen && (
@@ -171,7 +173,7 @@ export const CornerDock: React.FC<{
         <button
           type="button"
           className="dock-btn"
-          aria-label="mIoU benchmark"
+          aria-label="1.0 m protocol"
           aria-pressed={benchmarkOpen}
           onClick={() => setBenchmarkOpen((open) => !open)}
         >

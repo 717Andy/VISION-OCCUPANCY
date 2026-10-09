@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { VoxelCanvas, createSharedOrbit } from './VoxelCanvas';
 import { ControlPanel } from './ControlPanel';
 import { CameraFeed } from './CameraFeed';
@@ -265,8 +265,7 @@ export const App: React.FC = () => {
             if (msg.metric && typeof msg.metric.iou === 'number') {
               const grid = msg.metric.grid_m ?? 0.2;
               const tol = msg.metric.tolerance_cells ?? 1;
-              const unknown = msg.metric.unknown === 'ignored' ? 'unknown ignored' : 'unknown as free';
-              setMiou(`${msg.metric.iou.toFixed(2)} (${grid} m, tol ${tol}, ${unknown})`);
+              setMiou(`${msg.metric.iou.toFixed(2)} (${grid} m, tol ${tol})`);
               setDistanceZones(Array.isArray(msg.metric.distance_zones) ? msg.metric.distance_zones : []);
               setMiouDrop(msg.metric.miou_drop ?? {});
             } else if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
@@ -352,6 +351,12 @@ export const App: React.FC = () => {
     fetchRun(runId).then(setSelectedRun);
   }, []);
 
+  const protocolIou = useMemo(() => {
+    const row = benchmark?.rows.find((item) => item.pipeline === predictionModel);
+    if (!benchmark || !row || typeof row.iou !== 'number' || !Number.isFinite(row.iou)) return '—';
+    return `${row.iou.toFixed(3)} (${benchmark.voxel_m.toFixed(1)} m)`;
+  }, [benchmark, predictionModel]);
+
   const highlightCamera = selected
     ? camerasSeeingPoint(
         selected.voxel,
@@ -370,7 +375,8 @@ export const App: React.FC = () => {
       <TopBar
         fps={fps}
         latencyMs={latencyMs}
-        miou={miou}
+        liveIou={miou}
+        protocolIou={protocolIou}
         gpu={gpu}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -452,6 +458,7 @@ export const App: React.FC = () => {
           onSelectRun={handleSelectRun}
           distanceZones={distanceZones}
           miouDrop={miouDrop}
+          viewingModel={predictionModel}
         />
       </div>
 
