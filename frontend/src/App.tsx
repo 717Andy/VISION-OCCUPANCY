@@ -114,6 +114,7 @@ export const App: React.FC = () => {
   const [selectedRun, setSelectedRun] = useState<SavedRun | null>(null);
   const [freeOn, setFreeOn] = useState(false);
   const [unknownOn, setUnknownOn] = useState(false);
+  const [gtGhostOn, setGtGhostOn] = useState(false);
   const [predictionModel, setPredictionModel] = useState('Monocular depth');
   const [modelNames, setModelNames] = useState<string[]>([
     'Monocular depth',
@@ -421,6 +422,8 @@ export const App: React.FC = () => {
           freeEnabled={freeOn}
           unknownRef={unknownVoxelsRef}
           unknownEnabled={unknownOn}
+          ghostRef={gtVoxelsRef}
+          ghostEnabled={gtGhostOn}
         />
         {settingsOpen && (
           <ControlPanel
@@ -435,6 +438,8 @@ export const App: React.FC = () => {
             onFreeEnabledChange={setFreeOn}
             unknownOn={unknownOn}
             onUnknownEnabledChange={setUnknownOn}
+            ghostOn={gtGhostOn}
+            onGhostEnabledChange={setGtGhostOn}
           />
         )}
         {selected && !settingsOpen && (

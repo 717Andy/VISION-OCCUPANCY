@@ -39,6 +39,8 @@ interface VoxelCanvasProps {
   freeEnabled?: boolean;
   unknownRef?: MutableRefObject<VoxelData[]>;
   unknownEnabled?: boolean;
+  ghostRef?: MutableRefObject<VoxelData[]>;
+  ghostEnabled?: boolean;
   models?: string[];
   activeModel?: string;
   onModelChange?: (model: string) => void;
@@ -310,6 +312,86 @@ const DiscrepancyOverlay: React.FC<{
   );
 };
 
+const GHOST_COLOR = '#c5d4e0';
+
+const GhostOverlay: React.FC<{
+  voxelsRef: MutableRefObject<VoxelData[]>;
+  voxelSize: number;
+  enabled: boolean;
+  layers: Record<SemanticClass, boolean>;
+}> = ({ voxelsRef, voxelSize, enabled, layers }) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const sizeRef = useRef(voxelSize);
+  const enabledRef = useRef(enabled);
+  const layersRef = useRef(layers);
+  const lastVoxelsRef = useRef<VoxelData[] | null>(null);
+  const lastEnabledRef = useRef(enabled);
+  const lastLayersRef = useRef(layers);
+  const lastSizeRef = useRef(voxelSize);
+  sizeRef.current = voxelSize;
+  enabledRef.current = enabled;
+  layersRef.current = layers;
+
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const voxelsNow = voxelsRef.current;
+    const enabledNow = enabledRef.current;
+    const layersNow = layersRef.current;
+    const sizeNow = sizeRef.current;
+    const voxelsChanged = voxelsNow !== lastVoxelsRef.current;
+    const enabledChanged = enabledNow !== lastEnabledRef.current;
+    const layersChanged = layersNow !== lastLayersRef.current;
+    const sizeChanged = sizeNow !== lastSizeRef.current;
+    if (!voxelsChanged && !enabledChanged && !layersChanged && !sizeChanged) return;
+
+    lastEnabledRef.current = enabledNow;
+    lastLayersRef.current = layersNow;
+    lastVoxelsRef.current = voxelsNow;
+    lastSizeRef.current = sizeNow;
+    if (!enabledNow) {
+      mesh.count = 0;
+      return;
+    }
+
+    const visible = voxelsNow.filter((voxel) => layersNow[voxel.cls]);
+    const count = Math.min(visible.length, MAX_INSTANCES);
+    mesh.count = count;
+    const scale = Math.max(sizeNow, 0.12) * 1.02;
+    color.set(GHOST_COLOR);
+    for (let i = 0; i < count; i++) {
+      const voxel = visible[i];
+      dummy.position.set(-voxel.y, voxel.z, voxel.x);
+      dummy.scale.setScalar(scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt(i, color);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  });
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, MAX_INSTANCES]}
+      frustumCulled={false}
+      raycast={() => null}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial
+        toneMapped={false}
+        transparent
+        opacity={0.32}
+        depthWrite={false}
+        polygonOffset
+        polygonOffsetFactor={-1}
+      />
+    </instancedMesh>
+  );
+};
+
 const SyncedOrbitControls: React.FC<{
   orbitRef?: MutableRefObject<SharedOrbit>;
   orbitId?: string;
@@ -368,6 +450,8 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   freeEnabled = false,
   unknownRef,
   unknownEnabled = false,
+  ghostRef,
+  ghostEnabled = false,
   models,
   activeModel,
   onModelChange,
@@ -427,6 +511,15 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             onSelect={onSelect}
             claimRef={claimRef}
           />
+
+          {ghostRef && (
+            <GhostOverlay
+              voxelsRef={ghostRef}
+              voxelSize={voxelSize}
+              enabled={ghostEnabled}
+              layers={layers}
+            />
+          )}
 
           {discrepancyRef && (
             <DiscrepancyOverlay
