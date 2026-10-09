@@ -669,6 +669,23 @@ def _unknown_display_centers(
     return centers.astype(np.float32)
 
 
+def cell_centers(points: np.ndarray, voxel_size: float, bounds: np.ndarray = EGO_BOUNDS) -> np.ndarray:
+    """Unique occupied cell centers. A cell is occupied when it contains any point."""
+    pts = clip_to_bounds(points, bounds)
+    if pts.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    origin = np.asarray(bounds[:, 0], dtype=np.float64)
+    size = float(max(voxel_size, 0.05))
+    idx = np.floor((pts - origin) / size).astype(np.int64)
+    span = np.floor((bounds[:, 1] - origin) / size).astype(np.int64)
+    inside = np.all((idx >= 0) & (idx < span), axis=1)
+    idx = idx[inside]
+    if idx.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    uniq = np.unique(idx, axis=0)
+    return (origin + (uniq.astype(np.float64) + 0.5) * size).astype(np.float32)
+
+
 def clip_to_bounds(points: np.ndarray, bounds: np.ndarray = EGO_BOUNDS) -> np.ndarray:
     pts = np.asarray(points, dtype=np.float64)
     if pts.size == 0:

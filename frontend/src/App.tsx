@@ -6,7 +6,7 @@ import { PlaybackBar } from './PlaybackBar';
 import { TopBar } from './TopBar';
 import { InspectionPanel } from './InspectionPanel';
 import { CornerDock } from './CornerDock';
-import { fetchGpuLabel, fetchManifest, fetchRun, fetchRuns, wsUrl } from './api';
+import { fetchGpuLabel, fetchManifest, fetchModels, fetchRun, fetchRuns, wsUrl } from './api';
 import type {
   BenchmarkTable as BenchmarkTableData,
   ControlsState,
@@ -114,6 +114,14 @@ export const App: React.FC = () => {
   const [selectedRun, setSelectedRun] = useState<SavedRun | null>(null);
   const [freeOn, setFreeOn] = useState(false);
   const [unknownOn, setUnknownOn] = useState(false);
+  const [predictionModel, setPredictionModel] = useState('Monocular depth');
+  const [modelNames, setModelNames] = useState<string[]>([
+    'Monocular depth',
+    'VoxNet 3D CNN',
+    'Ground-plane IPM',
+    'Multi-view stereo',
+    'Lift-Splat',
+  ]);
 
   const predVoxelsRef = useRef<VoxelData[]>([]);
   const gtVoxelsRef = useRef<VoxelData[]>([]);
@@ -127,9 +135,11 @@ export const App: React.FC = () => {
   const thresholdRef = useRef(controls.threshold);
   const voxelSizeRef = useRef(controls.voxelSize);
   const frameIndexRef = useRef(frameIndex);
+  const modelRef = useRef(predictionModel);
   thresholdRef.current = controls.threshold;
   voxelSizeRef.current = controls.voxelSize;
   frameIndexRef.current = frameIndex;
+  modelRef.current = predictionModel;
 
   const sendOccupancyConfig = useCallback((socket?: WebSocket | null) => {
     const ws = socket ?? wsRef.current;
@@ -141,6 +151,7 @@ export const App: React.FC = () => {
         voxel_size: voxelSizeRef.current,
         occupancy_threshold: thresholdRef.current,
         threshold: thresholdRef.current,
+        model: modelRef.current,
         paused: false,
       }),
     );
@@ -155,7 +166,14 @@ export const App: React.FC = () => {
       .catch((err) => console.warn('nuScenes manifest unavailable', err));
     fetchGpuLabel().then(setGpu);
     fetchRuns().then(setRuns);
+    fetchModels().then((names) => {
+      if (names.length > 0) setModelNames(names);
+    });
   }, []);
+
+  useEffect(() => {
+    sendOccupancyConfig();
+  }, [predictionModel, sendOccupancyConfig]);
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl('/ws/occupancy'));
@@ -385,7 +403,10 @@ export const App: React.FC = () => {
         <VoxelCanvas
           className="pane pane-voxel pane-pred"
           title="Vision Prediction"
-          subtitle="MiDaS, ground-aligned"
+          subtitle={predictionModel}
+          models={modelNames}
+          activeModel={predictionModel}
+          onModelChange={setPredictionModel}
           voxelsRef={predVoxelsRef}
           voxelSize={controls.voxelSize}
           layers={controls.layers}

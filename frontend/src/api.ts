@@ -32,6 +32,17 @@ export async function fetchRun(runId: string): Promise<SavedRun | null> {
   return res.json();
 }
 
+export async function fetchModels(): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE}/models`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.models ?? []).map((row: { name?: string }) => row.name).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchGpuLabel(): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/telemetry`);

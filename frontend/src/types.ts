@@ -59,11 +59,15 @@ export interface BenchmarkBandCount {
 
 export interface BenchmarkRow {
   pipeline: string;
-  tp: number;
-  fp: number;
-  fn: number;
-  iou: number;
-  miou: number;
+  tp?: number;
+  fp?: number;
+  fn?: number;
+  iou?: number;
+  miou?: number;
+  precision?: number | null;
+  recall?: number | null;
+  latency_ms?: number;
+  error?: string;
   bands?: BenchmarkBandCount[];
 }
 
@@ -88,9 +92,10 @@ export interface BenchmarkTable {
   rows: BenchmarkRow[];
   heldout?: {
     frames: number;
-    monocular_threshold: number;
+    monocular_threshold?: number;
     monocular?: BenchmarkScore;
     voxnet?: BenchmarkScore;
+    scores?: { pipeline: string; iou?: number; miou?: number; error?: string }[];
   } | null;
 }
 
