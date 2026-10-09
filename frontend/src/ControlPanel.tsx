@@ -15,6 +15,8 @@ interface ControlPanelProps {
   onFreeEnabledChange: (enabled: boolean) => void;
   unknownOn: boolean;
   onUnknownEnabledChange: (enabled: boolean) => void;
+  ghostOn: boolean;
+  onGhostEnabledChange: (enabled: boolean) => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -29,6 +31,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onFreeEnabledChange,
   unknownOn,
   onUnknownEnabledChange,
+  ghostOn,
+  onGhostEnabledChange,
 }) => {
   const voxelFill = ((controls.voxelSize - 0.1) / 0.4) * 100;
   const threshFill = (controls.threshold / 1) * 100;
@@ -133,6 +137,16 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => onUnknownEnabledChange(!unknownOn)}
           >
             Unknown
+          </button>
+          <button
+            type="button"
+            className="discrepancy-btn"
+            aria-pressed={ghostOn}
+            aria-label="Show lidar ground truth as a ghost overlay"
+            style={ghostOn ? { borderColor: '#c5d4e0' } : undefined}
+            onClick={() => onGhostEnabledChange(!ghostOn)}
+          >
+            GT Ghost
           </button>
         </div>
       </div>
