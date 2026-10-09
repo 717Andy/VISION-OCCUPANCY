@@ -35,14 +35,10 @@ interface VoxelCanvasProps {
   discrepancyRef?: MutableRefObject<VoxelData[]>;
   discrepancyEnabled?: boolean;
   discrepancyColor?: string;
-  onDiscrepancyEnabledChange?: (enabled: boolean) => void;
-  onDiscrepancyColorChange?: (color: string) => void;
   freeRef?: MutableRefObject<VoxelData[]>;
   freeEnabled?: boolean;
-  onFreeEnabledChange?: (enabled: boolean) => void;
   unknownRef?: MutableRefObject<VoxelData[]>;
   unknownEnabled?: boolean;
-  onUnknownEnabledChange?: (enabled: boolean) => void;
   models?: string[];
   activeModel?: string;
   onModelChange?: (model: string) => void;
@@ -368,14 +364,10 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   discrepancyRef,
   discrepancyEnabled = false,
   discrepancyColor = '#f0883e',
-  onDiscrepancyEnabledChange,
-  onDiscrepancyColorChange,
   freeRef,
   freeEnabled = false,
-  onFreeEnabledChange,
   unknownRef,
   unknownEnabled = false,
-  onUnknownEnabledChange,
   models,
   activeModel,
   onModelChange,
@@ -385,8 +377,6 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
     () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}-${voxelSize}`,
     [layers, voxelSize],
   );
-  const showDiscrepancy = Boolean(discrepancyRef && onDiscrepancyEnabledChange);
-
   return (
     <section className={className}>
       <div className="pane-header voxel-header">
@@ -411,55 +401,15 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             )}
           </span>
         </h1>
-        {showDiscrepancy && (
-          <div className="discrepancy-controls">
-            <button
-              type="button"
-              className="discrepancy-btn"
-              aria-pressed={discrepancyEnabled}
-              style={discrepancyEnabled ? { borderColor: discrepancyColor } : undefined}
-              onClick={() => onDiscrepancyEnabledChange?.(!discrepancyEnabled)}
-            >
-              Discrepancy
-            </button>
-            <input
-              type="color"
-              className="discrepancy-color"
-              aria-label="Discrepancy color"
-              value={discrepancyColor}
-              onChange={(event) => onDiscrepancyColorChange?.(event.target.value)}
-            />
-            {onFreeEnabledChange && (
-              <button
-                type="button"
-                className="discrepancy-btn"
-                aria-pressed={freeEnabled}
-                onClick={() => onFreeEnabledChange(!freeEnabled)}
-              >
-                Free
-              </button>
-            )}
-            {onUnknownEnabledChange && (
-              <button
-                type="button"
-                className="discrepancy-btn"
-                aria-pressed={unknownEnabled}
-                onClick={() => onUnknownEnabledChange(!unknownEnabled)}
-              >
-                Unknown
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="height-legend" aria-label="Height colors">
-        <span className="height-legend-title">Height</span>
-        {HEIGHT_BANDS.map((band) => (
-          <span key={band.id} className="height-legend-row">
-            <i className="height-swatch" style={{ background: band.color }} />
-            {band.label}
-          </span>
-        ))}
+        <div className="height-legend" aria-label="Height colors">
+          <span className="height-legend-title">Height</span>
+          {HEIGHT_BANDS.map((band) => (
+            <span key={band.id} className="height-legend-row">
+              <i className="height-swatch" style={{ background: band.color }} />
+              {band.label}
+            </span>
+          ))}
+        </div>
       </div>
       <div className="voxel-stage">
         <Canvas camera={{ position: [12, 10, -22], fov: 50 }}>

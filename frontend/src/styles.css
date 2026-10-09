@@ -196,12 +196,9 @@ html, body, #root {
   position: relative;
 }
 
-.discrepancy-controls {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+.view-toggles {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -397,16 +394,14 @@ html, body, #root {
 
 .height-legend {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 5;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--panel-90);
-  border: 1px solid var(--border);
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
   pointer-events: none;
 }
 
