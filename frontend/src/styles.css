@@ -281,6 +281,7 @@ html, body, #root {
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
+  cursor: pointer;
 }
 
 .cam-tile img {
@@ -323,10 +324,70 @@ html, body, #root {
 .cam-br    { grid-column: 3; grid-row: 3; }
 .cam-back  { grid-column: 2; grid-row: 4; }
 
+.cam-front,
+.cam-back {
+  align-self: center;
+}
+
+.cam-fl,
+.cam-fr,
+.cam-bl,
+.cam-br {
+  width: 115%;
+  align-self: center;
+  justify-self: start;
+}
+
+.cam-fr,
+.cam-br {
+  justify-self: end;
+}
+
 .cam-placeholder {
   width: 100%;
   height: 100%;
   background: #d9d9d9;
+}
+
+.cam-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+}
+
+.cam-popup {
+  position: relative;
+  background: #1c2128;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.cam-popup img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cam-popup .cam-label {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+  background: rgba(13, 17, 23, 0.55);
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
 }
 
 .voxel-stage {
