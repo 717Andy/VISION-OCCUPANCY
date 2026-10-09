@@ -91,6 +91,20 @@ html, body, #root {
   grid-template-columns: minmax(260px, 0.32fr) 1fr 1fr;
 }
 
+.workspace.split .voxel-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  min-height: 72px;
+}
+
+.workspace.split .height-legend {
+  position: static;
+  transform: none;
+  flex: 1 0 100%;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
 .pane-voxel {
   min-width: 0;
 }

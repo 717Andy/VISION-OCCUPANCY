@@ -290,6 +290,34 @@ class PerceptionPipeline:
         self.last_frame_index = int(frame_index)
         return payload
 
+    def prediction_block(self, frame_index: int, voxel_size: float, threshold: float, model: str) -> bytes:
+        """Prediction voxels for a second pane, without replacing the live score."""
+        snap = (
+            self.last_miou,
+            self.last_metric,
+            self.voxel_source,
+            self.gt_source,
+            self.last_depth_ms,
+            self.last_project_ms,
+            self.last_benchmark,
+            self.last_frame_index,
+        )
+        try:
+            payload = self.occupancy_for_frame(frame_index, voxel_size, threshold, model)
+            pred_n = int(np.frombuffer(payload[:4], dtype=np.uint32)[0])
+            return bytes(payload[20 : 20 + pred_n * 16])
+        finally:
+            (
+                self.last_miou,
+                self.last_metric,
+                self.voxel_source,
+                self.gt_source,
+                self.last_depth_ms,
+                self.last_project_ms,
+                self.last_benchmark,
+                self.last_frame_index,
+            ) = snap
+
     def _refresh_benchmark(self, frame_index: int, threshold: float) -> None:
         """Attach the 1.0 m monocular-vs-VoxNet table without changing HUD mIoU."""
         key = (int(frame_index), round(float(threshold), 3))

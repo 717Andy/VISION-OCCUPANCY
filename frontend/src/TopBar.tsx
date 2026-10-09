@@ -42,7 +42,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           className={viewMode === 'split' ? 'active' : undefined}
           onClick={() => onViewModeChange('split')}
         >
-          Split GT
+          Split
         </button>
         <span>]</span>
       </div>

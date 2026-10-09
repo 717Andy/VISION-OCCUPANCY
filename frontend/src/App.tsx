@@ -87,6 +87,8 @@ function heightBandLabel(z: number): string {
   return 'Above 2.3 m';
 }
 
+const GROUND_TRUTH = 'Ground truth';
+
 const DEFAULT_CONTROLS: ControlsState = {
   voxelSize: 0.2,
   threshold: 0.38,
@@ -115,7 +117,9 @@ export const App: React.FC = () => {
   const [freeOn, setFreeOn] = useState(false);
   const [unknownOn, setUnknownOn] = useState(false);
   const [gtGhostOn, setGtGhostOn] = useState(false);
-  const [predictionModel, setPredictionModel] = useState('Monocular depth');
+  const [scoringModel, setScoringModel] = useState('Monocular depth');
+  const [leftSource, setLeftSource] = useState(GROUND_TRUTH);
+  const [rightSource, setRightSource] = useState('Monocular depth');
   const [modelNames, setModelNames] = useState<string[]>([
     'Monocular depth',
     'VoxNet 3D CNN',
@@ -125,22 +129,25 @@ export const App: React.FC = () => {
   ]);
 
   const predVoxelsRef = useRef<VoxelData[]>([]);
+  const compareVoxelsRef = useRef<VoxelData[]>([]);
   const gtVoxelsRef = useRef<VoxelData[]>([]);
   const errorVoxelsRef = useRef<VoxelData[]>([]);
   const freeVoxelsRef = useRef<VoxelData[]>([]);
   const unknownVoxelsRef = useRef<VoxelData[]>([]);
   const orbitRef = useRef(createSharedOrbit());
   const wsRef = useRef<WebSocket | null>(null);
-  const pendingFrameRef = useRef<ArrayBuffer | null>(null);
+  const pendingFrameRef = useRef<{ buffer: ArrayBuffer; compareCount: number } | null>(null);
   const rafRef = useRef<number>(0);
   const thresholdRef = useRef(controls.threshold);
   const voxelSizeRef = useRef(controls.voxelSize);
   const frameIndexRef = useRef(frameIndex);
-  const modelRef = useRef(predictionModel);
+  const modelRef = useRef(scoringModel);
+  const compareModelRef = useRef<string | null>(null);
+  const compareCountRef = useRef(0);
   thresholdRef.current = controls.threshold;
   voxelSizeRef.current = controls.voxelSize;
   frameIndexRef.current = frameIndex;
-  modelRef.current = predictionModel;
+  modelRef.current = scoringModel;
 
   const sendOccupancyConfig = useCallback((socket?: WebSocket | null) => {
     const ws = socket ?? wsRef.current;
@@ -153,6 +160,7 @@ export const App: React.FC = () => {
         occupancy_threshold: thresholdRef.current,
         threshold: thresholdRef.current,
         model: modelRef.current,
+        compare_model: compareModelRef.current,
         paused: false,
       }),
     );
@@ -172,9 +180,21 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  const compareModel =
+    viewMode === 'split' && leftSource !== GROUND_TRUTH && leftSource !== scoringModel ? leftSource : null;
+  compareModelRef.current = compareModel;
+
+  useEffect(() => {
+    if (rightSource !== GROUND_TRUTH) {
+      setScoringModel(rightSource);
+    } else if (viewMode === 'split' && leftSource !== GROUND_TRUTH) {
+      setScoringModel(leftSource);
+    }
+  }, [rightSource, leftSource, viewMode]);
+
   useEffect(() => {
     sendOccupancyConfig();
-  }, [predictionModel, sendOccupancyConfig]);
+  }, [scoringModel, compareModel, sendOccupancyConfig]);
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl('/ws/occupancy'));
@@ -202,7 +222,7 @@ export const App: React.FC = () => {
       return voxelList;
     };
 
-    const consumeFrame = (buffer: ArrayBuffer) => {
+    const consumeFrame = (buffer: ArrayBuffer, compareCount: number) => {
       if (buffer.byteLength < 20) return;
       const header = new Uint32Array(buffer, 0, 5);
       const predCount = header[0];
@@ -226,11 +246,19 @@ export const App: React.FC = () => {
       const freeFloats = new Float32Array(buffer, offset, freeCount * 4);
       offset += freeBytes;
       const unknownFloats = new Float32Array(buffer, offset, unknownCount * 4);
+      offset += unknownBytes;
       predVoxelsRef.current = decodeVoxels(predFloats, predCount);
       gtVoxelsRef.current = decodeVoxels(gtFloats, gtCount);
       errorVoxelsRef.current = decodeVoxels(errFloats, errCount);
       freeVoxelsRef.current = decodeVoxels(freeFloats, freeCount);
       unknownVoxelsRef.current = decodeVoxels(unknownFloats, unknownCount);
+      const compareBytes = compareCount * 16;
+      if (compareCount > 0 && buffer.byteLength >= offset + compareBytes) {
+        const compareFloats = new Float32Array(buffer, offset, compareCount * 4);
+        compareVoxelsRef.current = decodeVoxels(compareFloats, compareCount);
+      } else {
+        compareVoxelsRef.current = [];
+      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -253,8 +281,10 @@ export const App: React.FC = () => {
               miou_drop?: MiouDrop;
             };
             benchmark?: BenchmarkTableData | null;
+            compare_count?: number;
           };
           if (msg.type === 'occupancy_meta') {
+            compareCountRef.current = typeof msg.compare_count === 'number' ? msg.compare_count : 0;
             const elapsed =
               msg.elapsed_ms ?? (msg.depth_ms ?? 0) + (msg.project_ms ?? 0);
             setLatencyMs(elapsed);
@@ -281,13 +311,13 @@ export const App: React.FC = () => {
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return;
-      pendingFrameRef.current = event.data;
+      pendingFrameRef.current = { buffer: event.data, compareCount: compareCountRef.current };
       if (rafRef.current) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = 0;
         const pending = pendingFrameRef.current;
         pendingFrameRef.current = null;
-        if (pending) consumeFrame(pending);
+        if (pending) consumeFrame(pending.buffer, pending.compareCount);
       });
     };
 
@@ -352,10 +382,10 @@ export const App: React.FC = () => {
   }, []);
 
   const protocolIou = useMemo(() => {
-    const row = benchmark?.rows.find((item) => item.pipeline === predictionModel);
+    const row = benchmark?.rows.find((item) => item.pipeline === scoringModel);
     if (!benchmark || !row || typeof row.iou !== 'number' || !Number.isFinite(row.iou)) return '—';
     return `${row.iou.toFixed(3)} (${benchmark.voxel_m.toFixed(1)} m)`;
-  }, [benchmark, predictionModel]);
+  }, [benchmark, scoringModel]);
 
   const highlightCamera = selected
     ? camerasSeeingPoint(
@@ -369,6 +399,39 @@ export const App: React.FC = () => {
       orbitRef.current.driver = 'pred';
     }
   }, [viewMode]);
+
+  const sourceOptions = [GROUND_TRUTH, ...modelNames.filter((name) => name !== GROUND_TRUTH)];
+  const cloudFor = (source: string) => {
+    if (source === GROUND_TRUTH) return gtVoxelsRef;
+    if (compareModel && source === compareModel) return compareVoxelsRef;
+    return predVoxelsRef;
+  };
+  const renderScene = (source: string, onSource: (next: string) => void, orbitId: string, className: string) => (
+    <VoxelCanvas
+      className={className}
+      title={source === GROUND_TRUTH ? 'Ground truth' : 'Vision Prediction'}
+      models={sourceOptions}
+      activeModel={source}
+      onModelChange={onSource}
+      voxelsRef={cloudFor(source)}
+      voxelSize={controls.voxelSize}
+      layers={controls.layers}
+      selected={selected}
+      onSelect={(voxel) => handleSelectVoxel(voxel, source === GROUND_TRUTH ? 'lidar' : 'prediction')}
+      onOverlaySelect={(voxel) => handleSelectVoxel(voxel, 'prediction')}
+      orbitRef={orbitRef}
+      orbitId={orbitId}
+      discrepancyRef={errorVoxelsRef}
+      discrepancyEnabled={discrepancyOn}
+      discrepancyColor={discrepancyColor}
+      freeRef={freeVoxelsRef}
+      freeEnabled={freeOn}
+      unknownRef={unknownVoxelsRef}
+      unknownEnabled={unknownOn}
+      ghostRef={gtVoxelsRef}
+      ghostEnabled={gtGhostOn && source !== GROUND_TRUTH}
+    />
+  );
 
   return (
     <div className="app-shell">
@@ -393,44 +456,8 @@ export const App: React.FC = () => {
           }}
           highlightCamera={highlightCamera}
         />
-        {viewMode === 'split' && (
-          <VoxelCanvas
-            className="pane pane-voxel pane-gt"
-            title="Ground Truth"
-            subtitle="Camera-visible lidar, real hits"
-            voxelsRef={gtVoxelsRef}
-            voxelSize={controls.voxelSize}
-            layers={controls.layers}
-            selected={selected}
-            onSelect={(voxel) => handleSelectVoxel(voxel, 'lidar')}
-            orbitRef={orbitRef}
-            orbitId="gt"
-          />
-        )}
-        <VoxelCanvas
-          className="pane pane-voxel pane-pred"
-          title="Vision Prediction"
-          subtitle={predictionModel}
-          models={modelNames}
-          activeModel={predictionModel}
-          onModelChange={setPredictionModel}
-          voxelsRef={predVoxelsRef}
-          voxelSize={controls.voxelSize}
-          layers={controls.layers}
-          selected={selected}
-          onSelect={(voxel) => handleSelectVoxel(voxel, 'prediction')}
-          orbitRef={orbitRef}
-          orbitId="pred"
-          discrepancyRef={errorVoxelsRef}
-          discrepancyEnabled={discrepancyOn}
-          discrepancyColor={discrepancyColor}
-          freeRef={freeVoxelsRef}
-          freeEnabled={freeOn}
-          unknownRef={unknownVoxelsRef}
-          unknownEnabled={unknownOn}
-          ghostRef={gtVoxelsRef}
-          ghostEnabled={gtGhostOn}
-        />
+        {viewMode === 'split' && renderScene(leftSource, setLeftSource, 'gt', 'pane pane-voxel pane-gt')}
+        {renderScene(rightSource, setRightSource, 'pred', 'pane pane-voxel pane-pred')}
         {settingsOpen && (
           <ControlPanel
             controls={controls}
@@ -458,7 +485,7 @@ export const App: React.FC = () => {
           onSelectRun={handleSelectRun}
           distanceZones={distanceZones}
           miouDrop={miouDrop}
-          viewingModel={predictionModel}
+          viewingModel={scoringModel}
         />
       </div>
 
