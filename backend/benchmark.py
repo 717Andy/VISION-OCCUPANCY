@@ -1,4 +1,4 @@
-"""Score the monocular depth pipeline and the VoxNet baseline on one lidar grid.
+"""Score registered occupancy predictors on one lidar grid.
 
 Both predictions are voxelized at 1.0 m and compared with exact cell equality.
 The live HUD keeps its own 0.2 m score with a one-cell tolerance; this table
@@ -8,6 +8,7 @@ does not replace that number.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +28,9 @@ from voxnet_baseline import BENCH_VOXEL_M, held_out, load_baseline, predict_cent
 
 MONOCULAR_NAME = "Monocular depth"
 VOXNET_NAME = "VoxNet 3D CNN"
+IPM_NAME = "Ground-plane IPM"
+STEREO_NAME = "Multi-view stereo"
+LSS_NAME = "Lift-Splat"
 SCORING = (
     "exact 1.0 m cells; unknown cells ignored; "
     "IoU = TP / (TP + FP + FN) on occupied and free cells; "
@@ -114,6 +118,8 @@ def score_prediction(
         "fn": int(counts["fn"]),
         "iou": float(counts["iou"]),
         "miou": float(counts["miou"]),
+        "precision": _ratio(int(counts["tp"]), int(counts["fp"])),
+        "recall": _ratio(int(counts["tp"]), int(counts["fn"])),
         "bands": [
             {
                 "band": str(row["band"]),
@@ -165,14 +171,88 @@ def micro_summary(predict: Callable[[int], np.ndarray], frame_ids: list[int]) ->
     }
 
 
+def _ratio(numerator: int, other: int) -> float | None:
+    denom = numerator + other
+    if denom <= 0:
+        return None
+    return float(numerator / denom)
+
+
+def live_centers(name: str, frame_index: int, voxel_m: float) -> np.ndarray:
+    """Cell centers for the model drawn in the prediction pane."""
+    if name == IPM_NAME:
+        from ipm_baseline import predict_centers as ipm_centers
+
+        return ipm_centers(frame_index, voxel_m)
+    if name == STEREO_NAME:
+        from stereo_baseline import predict_centers as stereo_centers
+
+        return stereo_centers(frame_index, voxel_m)
+    for registered, predict, _identity in registered_predictors():
+        if registered == name:
+            return predict(int(frame_index), 0.38)
+    raise KeyError(name)
+
+
 def registered_predictors() -> list[tuple[str, Any, Any]]:
     """Name, predict(frame, threshold) -> centers, checkpoint id callable."""
+    from ipm_baseline import IPM_ID
+    from ipm_baseline import predict_centers as ipm_centers
+    from lss_baseline import checkpoint_id as lss_checkpoint_id
+    from lss_baseline import predict_centers as lss_centers
+    from stereo_baseline import STEREO_ID
+    from stereo_baseline import predict_centers as stereo_centers
     from voxnet_baseline import checkpoint_id as voxnet_checkpoint_id
 
     return [
         (MONOCULAR_NAME, monocular_centers, lambda: "midas-cache"),
         (VOXNET_NAME, lambda frame, _threshold: predict_centers(frame), voxnet_checkpoint_id),
+        (IPM_NAME, lambda frame, _threshold: ipm_centers(frame), lambda: IPM_ID),
+        (STEREO_NAME, lambda frame, _threshold: stereo_centers(frame), lambda: STEREO_ID),
+        (LSS_NAME, lambda frame, _threshold: lss_centers(frame), lss_checkpoint_id),
     ]
+
+
+_HELDOUT: dict[str, Any] | None = None
+
+
+def comparison_heldout() -> dict[str, Any]:
+    """Held-out scores for every predictor that can run. Cached for the process."""
+    global _HELDOUT
+    if _HELDOUT is not None:
+        return _HELDOUT
+    from nuscenes_loader import load_manifest
+
+    count = int(load_manifest().get("frame_count", 0))
+    frame_ids = [index for index in range(count) if held_out(index)]
+    scores: list[dict[str, Any]] = []
+    runtime = load_baseline()
+    stored = runtime.get("heldout")
+    if isinstance(stored, dict):
+        for key, pipeline in (("monocular", MONOCULAR_NAME), ("voxnet", VOXNET_NAME)):
+            row = stored.get(key)
+            if isinstance(row, dict) and "iou" in row:
+                scores.append({"pipeline": pipeline, "iou": row.get("iou"), "miou": row.get("miou")})
+    from ipm_baseline import predict_centers as ipm_centers
+    from stereo_baseline import predict_centers as stereo_centers
+
+    for pipeline, predict in ((IPM_NAME, ipm_centers), (STEREO_NAME, stereo_centers)):
+        try:
+            summary = micro_summary(predict, frame_ids)
+        except Exception as exc:
+            logger_warning = exc
+            scores.append({"pipeline": pipeline, "error": str(logger_warning)})
+            continue
+        scores.append({"pipeline": pipeline, "iou": summary["iou"], "miou": summary["miou"]})
+    try:
+        from lss_baseline import predict_centers as lss_centers
+
+        summary = micro_summary(lss_centers, frame_ids)
+        scores.append({"pipeline": LSS_NAME, "iou": summary["iou"], "miou": summary["miou"]})
+    except Exception as exc:
+        scores.append({"pipeline": LSS_NAME, "error": str(exc)})
+    _HELDOUT = {"frames": len(frame_ids), "scores": scores}
+    return _HELDOUT
 
 
 def build_frame_benchmark(frame_index: int, threshold: float) -> dict[str, Any]:
@@ -184,14 +264,21 @@ def build_frame_benchmark(frame_index: int, threshold: float) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for name, predict, identity in registered_predictors():
         try:
+            started = time.perf_counter()
             centers = predict(index, float(threshold))
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
             row = score_prediction(name, centers, occupied, free)
             row["checkpoint_id"] = identity()
+            row["latency_ms"] = float(elapsed_ms)
             rows.append(row)
-        except FileNotFoundError as exc:
+        except Exception as exc:
             rows.append({"pipeline": name, "error": str(exc)})
     runtime = load_baseline()
-    heldout = runtime.get("heldout")
+    stored = runtime.get("heldout")
+    heldout: dict[str, Any] = dict(stored) if isinstance(stored, dict) else {}
+    summary = comparison_heldout()
+    heldout["frames"] = summary["frames"]
+    heldout["scores"] = summary["scores"]
     return {
         "voxel_m": float(BENCH_VOXEL_M),
         "tolerance_cells": 0,

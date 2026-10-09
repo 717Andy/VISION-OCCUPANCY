@@ -1,5 +1,5 @@
-import React from 'react';
-import type { BenchmarkScore, BenchmarkTable as BenchmarkTableData, SavedRun, SavedRunSummary } from './types';
+import React, { useState } from 'react';
+import type { BenchmarkTable as BenchmarkTableData, SavedRun, SavedRunSummary } from './types';
 
 function formatCount(value: number): string {
   return Math.round(value).toLocaleString('en-US');
@@ -9,13 +9,35 @@ function formatScore(value: number): string {
   return Number.isFinite(value) ? value.toFixed(3) : '—';
 }
 
-function heldoutText(label: string, score: BenchmarkScore | undefined): string | null {
-  if (!score) return null;
-  return `${label} IoU ${formatScore(score.iou)} mIoU ${formatScore(score.miou)}`;
+function heldoutText(label: string, score: { iou?: number; miou?: number } | undefined): string | null {
+  if (!score || typeof score.iou !== 'number') return null;
+  const miou = typeof score.miou === 'number' ? score.miou : score.iou;
+  return `${label} IoU ${formatScore(score.iou)} mIoU ${formatScore(miou)}`;
+}
+
+const DEFAULT_COMPARE = ['VoxNet 3D CNN', 'Lift-Splat'];
+
+function deltaText(iou: number | undefined, reference: number | undefined): string {
+  if (typeof iou !== 'number' || typeof reference !== 'number') return '—';
+  const delta = iou - reference;
+  return `${delta >= 0 ? '+' : ''}${delta.toFixed(3)}`;
 }
 
 function formatCell(value: number | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? formatCount(value) : '—';
+}
+
+function heldScoresFor(
+  held: BenchmarkTableData['heldout'],
+  compared: string[],
+): { pipeline: string; iou?: number; miou?: number }[] {
+  if (!held) return [];
+  const fromScores = (held.scores ?? []).filter((row) => compared.includes(row.pipeline) && !row.error);
+  if (fromScores.length > 0) return fromScores;
+  const legacy: { pipeline: string; iou?: number; miou?: number }[] = [];
+  if (held.monocular) legacy.push({ pipeline: 'Monocular depth', iou: held.monocular.iou, miou: held.monocular.miou });
+  if (held.voxnet) legacy.push({ pipeline: 'VoxNet 3D CNN', iou: held.voxnet.iou, miou: held.voxnet.miou });
+  return legacy.filter((row) => compared.includes(row.pipeline));
 }
 
 function formatMaybeScore(value: number | undefined): string {
@@ -28,12 +50,32 @@ export const BenchmarkTable: React.FC<{
   selectedRun?: SavedRun | null;
   onSelectRun?: (id: string) => void;
 }> = ({ table, runs = [], selectedRun = null, onSelectRun }) => {
+  const [chosen, setChosen] = useState<string[]>(DEFAULT_COMPARE);
+  const [reference, setReference] = useState('Lift-Splat');
+  const names = table?.rows.map((row) => row.pipeline) ?? [];
+  const active = chosen.filter((name) => names.includes(name));
+  const compared = active.length >= 2 ? active : names.slice(0, Math.min(2, names.length));
+  const referenceName = compared.includes(reference) ? reference : compared[0];
+  const visible = (table?.rows ?? []).filter((row) => compared.includes(row.pipeline));
+  const referenceRow = visible.find((row) => row.pipeline === referenceName);
   const held = table?.heldout;
-  const heldLine = held
-    ? [heldoutText('Monocular', held.monocular), heldoutText('VoxNet', held.voxnet)]
-        .filter((part): part is string => Boolean(part))
-        .join(' · ')
-    : '';
+  const heldScores = heldScoresFor(held, compared);
+  const heldLine = heldScores
+    .map((row) => heldoutText(row.pipeline, row))
+    .filter((part): part is string => Boolean(part))
+    .join(' · ');
+
+  const toggle = (name: string) => {
+    setChosen((current) => {
+      const present = current.filter((item) => names.includes(item));
+      const base = present.length >= 2 ? present : names.slice(0, Math.min(2, names.length));
+      if (base.includes(name)) {
+        if (base.length <= 2) return base;
+        return base.filter((item) => item !== name);
+      }
+      return [...base, name];
+    });
+  };
 
   return (
     <aside className="overlay-card benchmark-card" aria-label="mIoU benchmark">
@@ -46,6 +88,27 @@ export const BenchmarkTable: React.FC<{
       <p className="bench-meta">
         Frame {table.frame_index} · {table.split} · {table.voxel_m.toFixed(1)} m cells
       </p>
+      <div className="bench-pick" role="group" aria-label="Models to compare">
+        {table.rows.map((row) => (
+          <div key={row.pipeline} className="bench-choice">
+            <input
+              type="checkbox"
+              checked={compared.includes(row.pipeline)}
+              aria-label={`Compare ${row.pipeline}`}
+              onChange={() => toggle(row.pipeline)}
+            />
+            <input
+              type="radio"
+              name="benchmark-reference"
+              checked={referenceName === row.pipeline}
+              disabled={!compared.includes(row.pipeline)}
+              onChange={() => setReference(row.pipeline)}
+              aria-label={`${row.pipeline} reference`}
+            />
+            <span>{row.pipeline}</span>
+          </div>
+        ))}
+      </div>
       <table>
         <thead>
           <tr>
@@ -53,19 +116,27 @@ export const BenchmarkTable: React.FC<{
             <th>TP</th>
             <th>FP</th>
             <th>FN</th>
+            <th>Prec</th>
+            <th>Rec</th>
             <th>IoU</th>
+            <th>ΔIoU</th>
             <th>Band mIoU</th>
+            <th>ms</th>
           </tr>
         </thead>
         <tbody>
-          {table.rows.map((row) => (
+          {visible.map((row) => (
             <tr key={row.pipeline}>
               <th scope="row">{row.pipeline}</th>
               <td>{formatCell(row.tp)}</td>
               <td>{formatCell(row.fp)}</td>
               <td>{formatCell(row.fn)}</td>
+              <td>{formatMaybeScore(row.precision ?? undefined)}</td>
+              <td>{formatMaybeScore(row.recall ?? undefined)}</td>
               <td>{formatMaybeScore(row.iou)}</td>
+              <td>{deltaText(row.iou, referenceRow?.iou)}</td>
               <td>{formatMaybeScore(row.miou)}</td>
+              <td>{typeof row.latency_ms === 'number' ? Math.round(row.latency_ms).toLocaleString('en-US') : '—'}</td>
             </tr>
           ))}
         </tbody>

@@ -100,6 +100,19 @@ def _checkpoint_id() -> str:
     return checkpoint_id()
 
 
+@app.get("/api/models")
+def list_models():
+    """Predictors the workbench can draw and score."""
+    from benchmark import registered_predictors
+
+    return {
+        "models": [
+            {"name": name, "id": identity()}
+            for name, _predict, identity in registered_predictors()
+        ]
+    }
+
+
 @app.get("/api/eval/frame/{frame_index}")
 def eval_frame(frame_index: int, threshold: float = 0.38):
     """Uncapped known-cell comparison for one frame. The display cap is not applied."""
@@ -187,11 +200,12 @@ async def occupancy_websocket(websocket: WebSocket):
     threshold = 0.38
     voxel_size = 0.2
     frame_index = 0
+    model = "Monocular depth"
     is_paused = False
     dirty = True
 
     async def receive_controls():
-        nonlocal threshold, voxel_size, frame_index, is_paused, dirty
+        nonlocal threshold, voxel_size, frame_index, model, is_paused, dirty
         try:
             while True:
                 message = await websocket.receive_text()
@@ -204,6 +218,9 @@ async def occupancy_websocket(websocket: WebSocket):
                     dirty = True
                 if "frame_index" in data:
                     frame_index = max(int(data["frame_index"]), 0)
+                    dirty = True
+                if "model" in data and data["model"]:
+                    model = str(data["model"])
                     dirty = True
                 if "paused" in data:
                     is_paused = bool(data["paused"])
@@ -218,6 +235,7 @@ async def occupancy_websocket(websocket: WebSocket):
                 idx = frame_index
                 vs = voxel_size
                 th = threshold
+                selected = model
                 dirty = False
                 start_time = time.perf_counter()
                 payload = await asyncio.to_thread(
@@ -225,6 +243,7 @@ async def occupancy_websocket(websocket: WebSocket):
                     idx,
                     vs,
                     th,
+                    selected,
                 )
                 elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                 await websocket.send_text(

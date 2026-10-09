@@ -21,6 +21,8 @@ class BenchmarkScoreTests(unittest.TestCase):
         self.assertEqual((row["tp"], row["fp"], row["fn"]), (1, 1, 1))
         self.assertAlmostEqual(row["iou"], 1.0 / 3.0)
         self.assertAlmostEqual(row["miou"], 1.0 / 3.0)
+        self.assertAlmostEqual(row["precision"], 0.5)
+        self.assertAlmostEqual(row["recall"], 0.5)
 
     def test_micro_summary_pools_frames_before_dividing(self):
         frames = {
@@ -81,7 +83,13 @@ class VoxNetHeadTests(unittest.TestCase):
         self.assertEqual(table["split"], "held-out")
         self.assertEqual(
             [row["pipeline"] for row in table["rows"]],
-            ["Monocular depth", "VoxNet 3D CNN"],
+            [
+                "Monocular depth",
+                "VoxNet 3D CNN",
+                "Ground-plane IPM",
+                "Multi-view stereo",
+                "Lift-Splat",
+            ],
         )
         scored = [row for row in table["rows"] if "error" not in row]
         self.assertTrue(any(row["pipeline"] == "VoxNet 3D CNN" for row in scored))
@@ -103,7 +111,16 @@ class RunStoreTests(unittest.TestCase):
         from benchmark import registered_predictors
 
         names = [name for name, _predict, _identity in registered_predictors()]
-        self.assertEqual(names, ["Monocular depth", "VoxNet 3D CNN"])
+        self.assertEqual(
+            names,
+            [
+                "Monocular depth",
+                "VoxNet 3D CNN",
+                "Ground-plane IPM",
+                "Multi-view stereo",
+                "Lift-Splat",
+            ],
+        )
 
     def test_saved_run_can_be_listed_and_loaded(self):
         from benchmark import RUNS_DIR, list_runs, load_run, save_run

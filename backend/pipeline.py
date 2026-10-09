@@ -23,6 +23,7 @@ from projection import (
     pack_occupancy,
     pack_occupancy_pair,
     project_cameras_to_voxel_pair,
+    voxelize_lidar,
     _cap_voxels,
 )
 
@@ -213,14 +214,27 @@ class PerceptionPipeline:
             frame_index, pred_centers, pred_occ, voxel_size, lidar_points
         )
 
+    def _registry_occupancy(self, frame_index: int, voxel_size: float, model: str) -> bytes:
+        """Draw one registered predictor. MiDaS is handled by the depth path."""
+        from benchmark import live_centers
+
+        started = time.perf_counter()
+        centers = live_centers(model, int(frame_index), float(voxel_size))
+        self.last_project_ms = (time.perf_counter() - started) * 1000.0
+        self.last_depth_ms = 0.0
+        pred_centers, pred_occ = voxelize_lidar(centers, voxel_size, cap=False)
+        self.voxel_source = model
+        return self._pack_with_lidar(frame_index, pred_centers, pred_occ, voxel_size)
+
     def occupancy_for_frame(
         self,
         frame_index: int,
         voxel_size: float = 0.2,
         threshold: float = 0.38,
+        model: str = "Monocular depth",
     ) -> bytes:
         """Build occupancy for a synchronized 6-camera nuScenes timestep."""
-        key = (int(frame_index), round(float(voxel_size), 3), round(float(threshold), 3))
+        key = (int(frame_index), round(float(voxel_size), 3), round(float(threshold), 3), str(model))
         with self._cache_lock:
             cached = self._occupancy_cache.get(key)
             if cached is not None:
@@ -237,7 +251,16 @@ class PerceptionPipeline:
             self._refresh_benchmark(int(frame_index), float(threshold))
             return payload
 
-        if not self.engine.ensure_loaded():
+        if model != "Monocular depth":
+            try:
+                payload = self._registry_occupancy(frame_index, voxel_size, model)
+            except Exception as exc:
+                logger.warning("%s occupancy failed for frame %s: %s", model, frame_index, exc)
+                self.voxel_source = "trigonometric-wave"
+                payload = self.generate_occupancy_pair(
+                    threshold=threshold, frame_index=frame_index, voxel_size=voxel_size
+                )
+        elif not self.engine.ensure_loaded():
             self.voxel_source = "trigonometric-wave"
             payload = self.generate_occupancy_pair(
                 threshold=threshold, frame_index=frame_index, voxel_size=voxel_size

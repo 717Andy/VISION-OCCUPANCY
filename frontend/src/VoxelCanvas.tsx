@@ -42,6 +42,9 @@ interface VoxelCanvasProps {
   unknownRef?: MutableRefObject<VoxelData[]>;
   unknownEnabled?: boolean;
   onUnknownEnabledChange?: (enabled: boolean) => void;
+  models?: string[];
+  activeModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
 const MAX_INSTANCES = 900;
@@ -376,6 +379,9 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   unknownRef,
   unknownEnabled = false,
   onUnknownEnabledChange,
+  models,
+  activeModel,
+  onModelChange,
 }) => {
   const claimRef = useRef<PressClaim | null>(null);
   const layerKey = useMemo(
@@ -389,7 +395,24 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
       <div className="pane-header voxel-header">
         <h1 className="pane-title">
           {title}
-          <span className="sub">{subtitle}</span>
+          <span className="sub">
+            {onModelChange && models && models.length > 0 ? (
+              <select
+                className="model-select"
+                aria-label="Prediction model"
+                value={activeModel}
+                onChange={(event) => onModelChange(event.target.value)}
+              >
+                {models.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              subtitle
+            )}
+          </span>
         </h1>
         {showDiscrepancy && (
           <div className="discrepancy-controls">
