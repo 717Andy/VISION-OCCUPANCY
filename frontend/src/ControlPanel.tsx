@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ControlsState, SemanticClass } from './types';
+import { useCardDrag } from './useCardDrag';
 
 interface ControlPanelProps {
   controls: ControlsState;
@@ -16,10 +17,11 @@ const LAYERS: { id: SemanticClass; label: string }[] = [
 export const ControlPanel: React.FC<ControlPanelProps> = ({ controls, onChange, onClose }) => {
   const voxelFill = ((controls.voxelSize - 0.1) / 0.4) * 100;
   const threshFill = (controls.threshold / 1) * 100;
+  const { dragStyle, onPointerDown } = useCardDrag();
 
   return (
-    <aside className="overlay-card controls-card" role="dialog" aria-label="Controls">
-      <div className="card-head">
+    <aside className="overlay-card controls-card" role="dialog" aria-label="Controls" style={dragStyle}>
+      <div className="card-head" onPointerDown={onPointerDown}>
         <h2>Controls</h2>
         <button type="button" className="close-btn" onClick={onClose} aria-label="Close controls">
           X
