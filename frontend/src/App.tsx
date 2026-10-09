@@ -417,20 +417,24 @@ export const App: React.FC = () => {
           discrepancyRef={errorVoxelsRef}
           discrepancyEnabled={discrepancyOn}
           discrepancyColor={discrepancyColor}
-          onDiscrepancyEnabledChange={setDiscrepancyOn}
-          onDiscrepancyColorChange={setDiscrepancyColor}
           freeRef={freeVoxelsRef}
           freeEnabled={freeOn}
-          onFreeEnabledChange={setFreeOn}
           unknownRef={unknownVoxelsRef}
           unknownEnabled={unknownOn}
-          onUnknownEnabledChange={setUnknownOn}
         />
         {settingsOpen && (
           <ControlPanel
             controls={controls}
             onChange={setControls}
             onClose={() => setSettingsOpen(false)}
+            discrepancyOn={discrepancyOn}
+            discrepancyColor={discrepancyColor}
+            onDiscrepancyEnabledChange={setDiscrepancyOn}
+            onDiscrepancyColorChange={setDiscrepancyColor}
+            freeOn={freeOn}
+            onFreeEnabledChange={setFreeOn}
+            unknownOn={unknownOn}
+            onUnknownEnabledChange={setUnknownOn}
           />
         )}
         {selected && !settingsOpen && (
