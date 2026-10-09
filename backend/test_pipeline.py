@@ -75,6 +75,29 @@ class OccupancyTensorTests(unittest.TestCase):
         self.assertLessEqual(err_n, pred_n)
         self.assertEqual(pipeline.gt_source, "unavailable")
 
+    def test_prediction_block_restores_the_primary_score(self):
+        pipeline = PerceptionPipeline()
+        lidar = np.array([[12.0, 0.0, 0.4], [18.0, -3.0, 1.2]], dtype=np.float32)
+
+        def fake(frame_index, voxel_size=0.2, threshold=0.38, model="Monocular depth"):
+            return pipeline.generate_occupancy_pair(
+                threshold=threshold,
+                frame_index=frame_index,
+                voxel_size=voxel_size,
+                lidar_points=lidar,
+            )
+
+        pipeline.occupancy_for_frame = fake
+        pipeline.last_miou = 0.25
+        pipeline.last_metric = {"iou": 0.25}
+        pipeline.voxel_source = "primary"
+        block = pipeline.prediction_block(3, 0.5, 0.5, "VoxNet 3D CNN")
+        self.assertEqual(pipeline.last_miou, 0.25)
+        self.assertEqual(pipeline.last_metric, {"iou": 0.25})
+        self.assertEqual(pipeline.voxel_source, "primary")
+        self.assertGreater(len(block), 0)
+        self.assertEqual(len(block) % 16, 0)
+
     def test_vectorized_generation_is_realtime(self):
         pipeline = PerceptionPipeline()
         pipeline.generate_occupancy_tensor(threshold=0.38)  # warmup

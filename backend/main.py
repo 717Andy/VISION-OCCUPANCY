@@ -201,11 +201,12 @@ async def occupancy_websocket(websocket: WebSocket):
     voxel_size = 0.2
     frame_index = 0
     model = "Monocular depth"
+    compare_model = ""
     is_paused = False
     dirty = True
 
     async def receive_controls():
-        nonlocal threshold, voxel_size, frame_index, model, is_paused, dirty
+        nonlocal threshold, voxel_size, frame_index, model, compare_model, is_paused, dirty
         try:
             while True:
                 message = await websocket.receive_text()
@@ -222,6 +223,9 @@ async def occupancy_websocket(websocket: WebSocket):
                 if "model" in data and data["model"]:
                     model = str(data["model"])
                     dirty = True
+                if "compare_model" in data:
+                    compare_model = str(data.get("compare_model") or "")
+                    dirty = True
                 if "paused" in data:
                     is_paused = bool(data["paused"])
         except Exception:
@@ -236,15 +240,18 @@ async def occupancy_websocket(websocket: WebSocket):
                 vs = voxel_size
                 th = threshold
                 selected = model
+                compare = compare_model
                 dirty = False
                 start_time = time.perf_counter()
-                payload = await asyncio.to_thread(
-                    pipeline.occupancy_for_frame,
-                    idx,
-                    vs,
-                    th,
-                    selected,
-                )
+
+                def build_frame():
+                    payload = pipeline.occupancy_for_frame(idx, vs, th, selected)
+                    if not compare or compare == selected:
+                        return payload, 0
+                    extra = pipeline.prediction_block(idx, vs, th, compare)
+                    return payload + extra, len(extra) // 16
+
+                payload, compare_count = await asyncio.to_thread(build_frame)
                 elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                 await websocket.send_text(
                     json.dumps(
@@ -260,6 +267,8 @@ async def occupancy_websocket(websocket: WebSocket):
                             "metric": pipeline.last_metric,
                             "gt_source": pipeline.gt_source,
                             "benchmark": pipeline.last_benchmark,
+                            "compare_model": compare or None,
+                            "compare_count": compare_count,
                         }
                     )
                 )

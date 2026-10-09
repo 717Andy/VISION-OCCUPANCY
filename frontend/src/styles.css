@@ -91,6 +91,20 @@ html, body, #root {
   grid-template-columns: minmax(260px, 0.32fr) 1fr 1fr;
 }
 
+.workspace.split .voxel-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  min-height: 72px;
+}
+
+.workspace.split .height-legend {
+  position: static;
+  transform: none;
+  flex: 1 0 100%;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
 .pane-voxel {
   min-width: 0;
 }
@@ -546,6 +560,24 @@ html, body, #root {
   font-size: 16px;
   font-weight: 600;
   text-align: center;
+  line-height: 1.35;
+}
+
+.viewing-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid #c5d4e0;
+  border-radius: 999px;
+  color: #c5d4e0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+.benchmark-card tr.viewing {
+  background: rgba(197, 212, 224, 0.08);
 }
 
 .bench-pick {

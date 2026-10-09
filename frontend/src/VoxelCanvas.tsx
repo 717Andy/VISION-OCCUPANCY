@@ -27,6 +27,7 @@ interface VoxelCanvasProps {
   layers: Record<SemanticClass, boolean>;
   selected: SelectedVoxel | null;
   onSelect: (voxel: VoxelData | null) => void;
+  onOverlaySelect?: (voxel: VoxelData | null) => void;
   title?: string;
   subtitle?: string;
   className?: string;
@@ -438,6 +439,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   layers,
   selected,
   onSelect,
+  onOverlaySelect,
   title = 'Vision Prediction',
   subtitle = '3D Voxel Grid Scene',
   className = 'pane',
@@ -457,6 +459,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   onModelChange,
 }) => {
   const claimRef = useRef<PressClaim | null>(null);
+  const selectOverlay = onOverlaySelect ?? onSelect;
   const layerKey = useMemo(
     () => `${layers.driveable}-${layers.vehicle}-${layers.pedestrian}-${voxelSize}`,
     [layers, voxelSize],
@@ -470,7 +473,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             {onModelChange && models && models.length > 0 ? (
               <select
                 className="model-select"
-                aria-label="Prediction model"
+                aria-label="Scene source"
                 value={activeModel}
                 onChange={(event) => onModelChange(event.target.value)}
               >
@@ -529,7 +532,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
               colorHex={discrepancyColor}
               selected={selected?.voxel ?? null}
               claimRef={claimRef}
-              onSelect={onSelect}
+              onSelect={selectOverlay}
             />
           )}
           {freeRef && (
@@ -540,7 +543,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
               colorHex="#9aa4b2"
               selected={selected?.voxel ?? null}
               claimRef={claimRef}
-              onSelect={onSelect}
+              onSelect={selectOverlay}
             />
           )}
           {unknownRef && (
@@ -551,7 +554,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
               colorHex="#3d4450"
               selected={selected?.voxel ?? null}
               claimRef={claimRef}
-              onSelect={onSelect}
+              onSelect={selectOverlay}
             />
           )}
 

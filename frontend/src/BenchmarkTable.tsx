@@ -49,7 +49,8 @@ export const BenchmarkTable: React.FC<{
   runs?: SavedRunSummary[];
   selectedRun?: SavedRun | null;
   onSelectRun?: (id: string) => void;
-}> = ({ table, runs = [], selectedRun = null, onSelectRun }) => {
+  viewingModel?: string;
+}> = ({ table, runs = [], selectedRun = null, onSelectRun, viewingModel }) => {
   const [chosen, setChosen] = useState<string[]>(DEFAULT_COMPARE);
   const [reference, setReference] = useState('Lift-Splat');
   const names = table?.rows.map((row) => row.pipeline) ?? [];
@@ -58,6 +59,13 @@ export const BenchmarkTable: React.FC<{
   const referenceName = compared.includes(reference) ? reference : compared[0];
   const visible = (table?.rows ?? []).filter((row) => compared.includes(row.pipeline));
   const referenceRow = visible.find((row) => row.pipeline === referenceName);
+  const viewingRow = (table?.rows ?? []).find((row) => row.pipeline === viewingModel);
+  const viewingCompared = Boolean(viewingModel && compared.includes(viewingModel));
+  const viewingScore =
+    viewingRow && typeof viewingRow.iou === 'number' && Number.isFinite(viewingRow.iou)
+      ? viewingRow.iou.toFixed(3)
+      : null;
+  const protocolTitle = `${(table?.voxel_m ?? 1).toFixed(1)} m protocol · exact cells · unknown ignored`;
   const held = table?.heldout;
   const heldScores = heldScoresFor(held, compared);
   const heldLine = heldScores
@@ -78,16 +86,21 @@ export const BenchmarkTable: React.FC<{
   };
 
   return (
-    <aside className="overlay-card benchmark-card" aria-label="mIoU benchmark">
-      <h2>mIoU benchmark</h2>
+    <aside className="overlay-card benchmark-card" aria-label="1.0 m protocol">
+      <h2>{protocolTitle}</h2>
       {(!table || table.rows.length === 0) && runs.length === 0 && (
         <p className="bench-note">The 1.0 m comparison is not ready yet.</p>
       )}
       {table && table.rows.length > 0 && (
         <>
       <p className="bench-meta">
-        Frame {table.frame_index} · {table.split} · {table.voxel_m.toFixed(1)} m cells
+        Frame {table.frame_index} · {table.split}
       </p>
+      {viewingModel && !viewingCompared && (
+        <p className="bench-note viewing-chip">
+          Now viewing {viewingModel} · protocol IoU {viewingScore ?? '—'}
+        </p>
+      )}
       <div className="bench-pick" role="group" aria-label="Models to compare">
         {table.rows.map((row) => (
           <div key={row.pipeline} className="bench-choice">
@@ -126,8 +139,11 @@ export const BenchmarkTable: React.FC<{
         </thead>
         <tbody>
           {visible.map((row) => (
-            <tr key={row.pipeline}>
-              <th scope="row">{row.pipeline}</th>
+            <tr key={row.pipeline} className={row.pipeline === viewingModel ? 'viewing' : undefined}>
+              <th scope="row">
+                {row.pipeline}
+                {row.pipeline === viewingModel && <span className="viewing-badge">viewing</span>}
+              </th>
               <td>{formatCell(row.tp)}</td>
               <td>{formatCell(row.fp)}</td>
               <td>{formatCell(row.fn)}</td>
@@ -144,7 +160,7 @@ export const BenchmarkTable: React.FC<{
       <p className="bench-note">
         IoU = TP / (TP + FP + FN) on exact {table.voxel_m.toFixed(1)} m cells. Unknown cells are
         ignored. Band mIoU averages the height bands below 0.45 m, 0.45 to 2.3 m, and above 2.3 m.
-        Those bands are not object classes. HUD IoU is the live 0.2 m score with one-cell tolerance.
+        Those bands are not object classes. Live IoU is the on-screen score at the live voxel size with one-cell tolerance.
       </p>
       {held && heldLine && (
         <p className="bench-note">
