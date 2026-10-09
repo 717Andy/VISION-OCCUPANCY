@@ -668,6 +668,13 @@ html, body, #root {
   margin-bottom: 16px;
 }
 
+.control-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 6px;
+}
+
 .control-block label,
 .inspect-card .field-label {
   display: block;
