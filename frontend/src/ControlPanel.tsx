@@ -62,7 +62,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           />
           <span className="value">{controls.voxelSize.toFixed(1)}m</span>
         </div>
-        <p className="control-note">Live view and HUD IoU. The benchmark stays on 1.0 m cells.</p>
+        <p className="control-note">Live view and live IoU. The protocol table stays on 1.0 m cells.</p>
       </div>
 
       <div className="control-block">
