@@ -201,6 +201,9 @@ def registered_predictors() -> list[tuple[str, Any, Any]]:
     from camera_space_baseline import CAMERA_SPACE_NAME
     from camera_space_baseline import checkpoint_id as camera_space_checkpoint_id
     from camera_space_baseline import predict_centers as camera_space_centers
+    from ray_surface_baseline import RAY_SURFACE_NAME
+    from ray_surface_baseline import checkpoint_id as ray_surface_checkpoint_id
+    from ray_surface_baseline import predict_centers as ray_surface_centers
     from lss_baseline import checkpoint_id as lss_checkpoint_id
     from lss_baseline import predict_centers as lss_centers
     from stereo_baseline import STEREO_ID
@@ -214,6 +217,7 @@ def registered_predictors() -> list[tuple[str, Any, Any]]:
         (STEREO_NAME, lambda frame, _threshold: stereo_centers(frame), lambda: STEREO_ID),
         (LSS_NAME, lambda frame, _threshold: lss_centers(frame), lss_checkpoint_id),
         (CAMERA_SPACE_NAME, lambda frame, _threshold: camera_space_centers(frame), camera_space_checkpoint_id),
+        (RAY_SURFACE_NAME, lambda frame, _threshold: ray_surface_centers(frame), ray_surface_checkpoint_id),
     ]
 
 
@@ -263,6 +267,14 @@ def comparison_heldout() -> dict[str, Any]:
         scores.append({"pipeline": camera_name, "iou": summary["iou"], "miou": summary["miou"]})
     except Exception as exc:
         scores.append({"pipeline": "Camera-space", "error": str(exc)})
+    try:
+        from ray_surface_baseline import RAY_SURFACE_NAME as ray_name
+        from ray_surface_baseline import predict_centers as ray_surface_centers
+
+        summary = micro_summary(ray_surface_centers, frame_ids)
+        scores.append({"pipeline": ray_name, "iou": summary["iou"], "miou": summary["miou"]})
+    except Exception as exc:
+        scores.append({"pipeline": "Ray surface", "error": str(exc)})
     _HELDOUT = {"frames": len(frame_ids), "scores": scores}
     return _HELDOUT
 
