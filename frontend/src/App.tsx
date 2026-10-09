@@ -127,6 +127,7 @@ export const App: React.FC = () => {
     'Multi-view stereo',
     'Lift-Splat',
     'Camera-space',
+    'Ray surface',
   ]);
 
   const predVoxelsRef = useRef<VoxelData[]>([]);
