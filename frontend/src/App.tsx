@@ -126,6 +126,7 @@ export const App: React.FC = () => {
     'Ground-plane IPM',
     'Multi-view stereo',
     'Lift-Splat',
+    'Camera-space',
   ]);
 
   const predVoxelsRef = useRef<VoxelData[]>([]);

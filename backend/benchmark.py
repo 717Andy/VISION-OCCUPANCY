@@ -198,6 +198,9 @@ def registered_predictors() -> list[tuple[str, Any, Any]]:
     """Name, predict(frame, threshold) -> centers, checkpoint id callable."""
     from ipm_baseline import IPM_ID
     from ipm_baseline import predict_centers as ipm_centers
+    from camera_space_baseline import CAMERA_SPACE_NAME
+    from camera_space_baseline import checkpoint_id as camera_space_checkpoint_id
+    from camera_space_baseline import predict_centers as camera_space_centers
     from lss_baseline import checkpoint_id as lss_checkpoint_id
     from lss_baseline import predict_centers as lss_centers
     from stereo_baseline import STEREO_ID
@@ -210,6 +213,7 @@ def registered_predictors() -> list[tuple[str, Any, Any]]:
         (IPM_NAME, lambda frame, _threshold: ipm_centers(frame), lambda: IPM_ID),
         (STEREO_NAME, lambda frame, _threshold: stereo_centers(frame), lambda: STEREO_ID),
         (LSS_NAME, lambda frame, _threshold: lss_centers(frame), lss_checkpoint_id),
+        (CAMERA_SPACE_NAME, lambda frame, _threshold: camera_space_centers(frame), camera_space_checkpoint_id),
     ]
 
 
@@ -251,6 +255,14 @@ def comparison_heldout() -> dict[str, Any]:
         scores.append({"pipeline": LSS_NAME, "iou": summary["iou"], "miou": summary["miou"]})
     except Exception as exc:
         scores.append({"pipeline": LSS_NAME, "error": str(exc)})
+    try:
+        from camera_space_baseline import CAMERA_SPACE_NAME as camera_name
+        from camera_space_baseline import predict_centers as camera_space_centers
+
+        summary = micro_summary(camera_space_centers, frame_ids)
+        scores.append({"pipeline": camera_name, "iou": summary["iou"], "miou": summary["miou"]})
+    except Exception as exc:
+        scores.append({"pipeline": "Camera-space", "error": str(exc)})
     _HELDOUT = {"frames": len(frame_ids), "scores": scores}
     return _HELDOUT
 
