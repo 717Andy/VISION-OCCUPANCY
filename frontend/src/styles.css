@@ -413,12 +413,13 @@ html, body, #root {
   max-height: calc(100% - 80px);
   overflow: auto;
   padding: 14px 18px 22px;
+  transform: translate(var(--drag-x, 0px), var(--drag-y, 0px));
 }
 
 .inspect-card {
   left: 50%;
   top: 72px;
-  transform: translateX(-20%);
+  transform: translateX(-20%) translate(var(--drag-x, 0px), var(--drag-y, 0px));
   width: min(360px, calc(100% - 24px));
   padding: 14px 18px 22px;
 }
@@ -574,6 +575,13 @@ html, body, #root {
   justify-content: center;
   position: relative;
   margin-bottom: 10px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.card-head:active {
+  cursor: grabbing;
 }
 
 .card-head h2 {

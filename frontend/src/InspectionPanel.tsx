@@ -1,5 +1,6 @@
 import React from 'react';
 import type { SelectedVoxel } from './types';
+import { useCardDrag } from './useCardDrag';
 
 interface InspectionPanelProps {
   selected: SelectedVoxel;
@@ -20,10 +21,11 @@ function signed(n: number, digits = 1): string {
 export const InspectionPanel: React.FC<InspectionPanelProps> = ({ selected, onClose }) => {
   const { voxel, meters, source, cameras } = selected;
   const band = CLASS_LABEL[voxel.cls] ?? voxel.cls;
+  const { dragStyle, onPointerDown } = useCardDrag();
 
   return (
-    <aside className="overlay-card inspect-card" role="dialog" aria-label="Voxel inspection">
-      <div className="card-head">
+    <aside className="overlay-card inspect-card" role="dialog" aria-label="Voxel inspection" style={dragStyle}>
+      <div className="card-head" onPointerDown={onPointerDown}>
         <h2>Voxel Inspection</h2>
         <button type="button" className="close-btn" onClick={onClose} aria-label="Close inspection">
           X
