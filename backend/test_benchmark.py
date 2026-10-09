@@ -89,6 +89,7 @@ class VoxNetHeadTests(unittest.TestCase):
                 "Ground-plane IPM",
                 "Multi-view stereo",
                 "Lift-Splat",
+                "Camera-space",
             ],
         )
         scored = [row for row in table["rows"] if "error" not in row]
@@ -119,6 +120,7 @@ class RunStoreTests(unittest.TestCase):
                 "Ground-plane IPM",
                 "Multi-view stereo",
                 "Lift-Splat",
+                "Camera-space",
             ],
         )
 
