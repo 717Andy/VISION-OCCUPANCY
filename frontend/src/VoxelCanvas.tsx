@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import type { SemanticClass, SelectedVoxel, VoxelData } from './types';
+import { HEIGHT_BANDS, HEIGHT_COLOR } from './heightBands';
 
 export type SharedOrbit = {
   position: THREE.Vector3;
@@ -64,11 +65,7 @@ function hitInstanceId(event: {
   return id == null ? null : id;
 }
 
-const CLASS_COLOR: Record<SemanticClass, string> = {
-  driveable: '#7ee787',
-  vehicle: '#58a6ff',
-  pedestrian: '#f85149',
-};
+const CLASS_COLOR = HEIGHT_COLOR;
 
 const PickGesture: React.FC<{
   claimRef: MutableRefObject<PressClaim | null>;
@@ -454,6 +451,15 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             )}
           </div>
         )}
+      </div>
+      <div className="height-legend" aria-label="Height colors">
+        <span className="height-legend-title">Height</span>
+        {HEIGHT_BANDS.map((band) => (
+          <span key={band.id} className="height-legend-row">
+            <i className="height-swatch" style={{ background: band.color }} />
+            {band.label}
+          </span>
+        ))}
       </div>
       <div className="voxel-stage">
         <Canvas camera={{ position: [12, 10, -22], fov: 50 }}>

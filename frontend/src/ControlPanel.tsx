@@ -1,5 +1,6 @@
 import React from 'react';
-import type { ControlsState, SemanticClass } from './types';
+import type { ControlsState } from './types';
+import { HEIGHT_BANDS } from './heightBands';
 import { useCardDrag } from './useCardDrag';
 
 interface ControlPanelProps {
@@ -7,12 +8,6 @@ interface ControlPanelProps {
   onChange: (next: ControlsState) => void;
   onClose: () => void;
 }
-
-const LAYERS: { id: SemanticClass; label: string }[] = [
-  { id: 'driveable', label: 'Below 0.45 m' },
-  { id: 'vehicle', label: '0.45 to 2.3 m' },
-  { id: 'pedestrian', label: 'Above 2.3 m' },
-];
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({ controls, onChange, onClose }) => {
   const voxelFill = ((controls.voxelSize - 0.1) / 0.4) * 100;
@@ -63,9 +58,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ controls, onChange, 
       </div>
 
       <div className="control-block">
-        <label>Semantic Layers:</label>
+        <label>Height:</label>
         <div className="layer-list">
-          {LAYERS.map((layer) => (
+          {HEIGHT_BANDS.map((layer) => (
             <label key={layer.id} className="layer-item">
               <input
                 type="checkbox"
@@ -77,6 +72,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ controls, onChange, 
                   })
                 }
               />
+              <i className="height-swatch" style={{ background: layer.color }} />
               {layer.label}
             </label>
           ))}
