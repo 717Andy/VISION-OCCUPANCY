@@ -58,10 +58,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           />
           <span className="value">{controls.voxelSize.toFixed(1)}m</span>
         </div>
+        <p className="control-note">Live view and HUD IoU. The benchmark stays on 1.0 m cells.</p>
       </div>
 
       <div className="control-block">
-        <label htmlFor="occupancy-threshold">Occupancy Threshold:</label>
+        <label htmlFor="occupancy-threshold">Occupancy Threshold (MiDaS):</label>
         <div className="slider-row">
           <input
             id="occupancy-threshold"
