@@ -48,6 +48,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const voxelFill = ((controls.voxelSize - 0.1) / 0.4) * 100;
   const threshFill = (controls.threshold / 1) * 100;
   const opacityFill = ((controls.opacity - 0.15) / 0.85) * 100;
+  const rangeFill = ((controls.maxRange - 10) / 40) * 100;
   const { dragStyle, onPointerDown } = useCardDrag();
 
   return (
@@ -93,6 +94,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <span className="value">{controls.opacity.toFixed(2)}</span>
         </div>
         <p className="control-note">Fades the occupancy cubes. Protocol false positives and misses stay solid.</p>
+      </div>
+
+      <div className="control-block">
+        <label htmlFor="max-range">Max range:</label>
+        <div className="slider-row">
+          <input
+            id="max-range"
+            type="range"
+            min={10}
+            max={50}
+            step={5}
+            value={controls.maxRange}
+            style={{ ['--fill' as string]: `${rangeFill}%` }}
+            onChange={(e) => onChange({ ...controls, maxRange: Number(e.target.value) })}
+          />
+          <span className="value">{controls.maxRange.toFixed(0)}m</span>
+        </div>
+        <p className="control-note">Hides cells beyond this horizontal range. Scores stay on the full grid.</p>
       </div>
 
       <div className="control-block">

@@ -93,6 +93,7 @@ const DEFAULT_CONTROLS: ControlsState = {
   voxelSize: 0.2,
   threshold: 0.38,
   opacity: 1,
+  maxRange: 50,
   layers: { driveable: true, vehicle: true, pedestrian: true },
 };
 
@@ -485,6 +486,7 @@ export const App: React.FC = () => {
       voxelsRef={cloudFor(source)}
       voxelSize={controls.voxelSize}
       opacity={controls.opacity}
+      maxRange={controls.maxRange}
       layers={controls.layers}
       selected={selected}
       onSelect={(voxel) => handleSelectVoxel(voxel, source === GROUND_TRUTH ? 'lidar' : 'prediction')}

@@ -47,6 +47,7 @@ export interface ControlsState {
   voxelSize: number;
   threshold: number;
   opacity: number;
+  maxRange: number;
   layers: Record<SemanticClass, boolean>;
 }
 
