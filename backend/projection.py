@@ -316,6 +316,31 @@ def _cell_keys_from_points(
     return {tuple(int(v) for v in row) for row in idx.tolist()}
 
 
+def protocol_error_centers(
+    pred_centers: np.ndarray,
+    occupied_centers: np.ndarray,
+    free_centers: np.ndarray,
+    voxel_size: float = 1.0,
+    origin: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """False-positive and miss centers on an exact known-space grid.
+
+    A false positive is a prediction that lands in a free cell. A miss is an
+    occupied cell the prediction did not cover. Predictions in unknown cells
+    are ignored, matching the 1.0 m protocol.
+    """
+    size = float(max(voxel_size, 0.05))
+    origin_vec = EGO_BOUNDS[:, 0] if origin is None else np.asarray(origin, dtype=np.float64)
+    pred = _cell_keys_from_points(pred_centers, size, origin_vec)
+    occupied = _cell_keys_from_points(occupied_centers, size, origin_vec)
+    free = _cell_keys_from_points(free_centers, size, origin_vec) - occupied
+    pred_known = pred & (occupied | free)
+    hits = pred_known & occupied
+    false_positive = pred_known - hits
+    misses = occupied - hits
+    return _centers_from_keys(false_positive, size, origin_vec), _centers_from_keys(misses, size, origin_vec)
+
+
 def _centers_from_keys(
     keys: set[tuple[int, int, int]],
     voxel_size: float,

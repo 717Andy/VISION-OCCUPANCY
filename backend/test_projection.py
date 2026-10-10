@@ -334,6 +334,14 @@ class VoxelizationTests(unittest.TestCase):
         missed = known_space_counts(on_ray, occupied, free, 1.0, origin=np.zeros(3))
         self.assertEqual(missed["fp"], 1)
         self.assertEqual(missed["tp"], 0)
+        from projection import protocol_error_centers
+
+        false_positive, misses = protocol_error_centers(
+            on_ray, occupied, free, 1.0, origin=np.zeros(3)
+        )
+        self.assertEqual(false_positive.shape[0], 1)
+        self.assertEqual(misses.shape[0], occupied.shape[0])
+        self.assertTrue(np.allclose(false_positive[0, :2], on_ray[0, :2], atol=0.6))
         ignored = known_space_counts(off_ray, occupied, free, 1.0, origin=np.zeros(3))
         self.assertEqual(ignored["fp"], 0)
         self.assertEqual(ignored["fn"], occupied.shape[0])

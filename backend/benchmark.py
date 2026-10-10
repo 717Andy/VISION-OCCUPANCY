@@ -8,6 +8,7 @@ does not replace that number.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -22,8 +23,11 @@ from projection import (
     camera_known_space,
     fuse_camera_points,
     known_space_counts,
+    protocol_error_centers,
     voxelize_occupancy,
 )
+
+logger = logging.getLogger(__name__)
 from voxnet_baseline import BENCH_VOXEL_M, held_out, load_baseline, predict_centers
 
 MONOCULAR_NAME = "Monocular depth"
@@ -88,6 +92,43 @@ def known_grids_for_frame(frame_index: int) -> tuple[np.ndarray, np.ndarray]:
         points, cameras, BENCH_VOXEL_M, origin=EGO_BOUNDS[:, 0]
     )
     return occupied, free
+
+
+_PROTOCOL_CACHE: dict[tuple[int, str], tuple[np.ndarray, np.ndarray]] = {}
+_PROTOCOL_CACHE_LIMIT = 24
+
+
+def protocol_false_and_miss(model: str, frame_index: int) -> tuple[np.ndarray, np.ndarray]:
+    """1.0 m false-positive and miss centers for one registered model."""
+    key = (int(frame_index), str(model))
+    cached = _PROTOCOL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    empty = np.zeros((0, 3), dtype=np.float32)
+    try:
+        pred = live_centers(str(model), int(frame_index), float(BENCH_VOXEL_M))
+        occupied, free = known_grids_for_frame(int(frame_index))
+        fp, fn = protocol_error_centers(pred, occupied, free, BENCH_VOXEL_M, EGO_BOUNDS[:, 0])
+    except Exception as exc:
+        logger.warning("Protocol error unavailable for %s frame %s: %s", model, frame_index, exc)
+        fp, fn = empty, empty
+    if len(_PROTOCOL_CACHE) >= _PROTOCOL_CACHE_LIMIT:
+        _PROTOCOL_CACHE.pop(next(iter(_PROTOCOL_CACHE)))
+    _PROTOCOL_CACHE[key] = (fp, fn)
+    return fp, fn
+
+
+def pack_protocol_errors(model: str, frame_index: int) -> tuple[bytes, int, int]:
+    """Float32 (x, y, z, 1) blocks for false positives then misses."""
+    false_positive, misses = protocol_false_and_miss(model, frame_index)
+
+    def pack(centers: np.ndarray) -> bytes:
+        if centers.size == 0:
+            return b""
+        ones = np.ones((centers.shape[0], 1), dtype=np.float32)
+        return np.concatenate([centers.astype(np.float32), ones], axis=1).tobytes()
+
+    return pack(false_positive) + pack(misses), int(false_positive.shape[0]), int(misses.shape[0])
 
 
 def gt_centers_for_frame(frame_index: int) -> np.ndarray:

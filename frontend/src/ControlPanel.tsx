@@ -17,7 +17,14 @@ interface ControlPanelProps {
   onUnknownEnabledChange: (enabled: boolean) => void;
   ghostOn: boolean;
   onGhostEnabledChange: (enabled: boolean) => void;
+  falsePositiveOn: boolean;
+  onFalsePositiveEnabledChange: (enabled: boolean) => void;
+  missOn: boolean;
+  onMissEnabledChange: (enabled: boolean) => void;
 }
+
+const FALSE_POSITIVE_COLOR = '#ff5d73';
+const MISS_COLOR = '#e6d35a';
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   controls,
@@ -33,9 +40,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onUnknownEnabledChange,
   ghostOn,
   onGhostEnabledChange,
+  falsePositiveOn,
+  onFalsePositiveEnabledChange,
+  missOn,
+  onMissEnabledChange,
 }) => {
   const voxelFill = ((controls.voxelSize - 0.1) / 0.4) * 100;
   const threshFill = (controls.threshold / 1) * 100;
+  const opacityFill = ((controls.opacity - 0.15) / 0.85) * 100;
   const { dragStyle, onPointerDown } = useCardDrag();
 
   return (
@@ -63,6 +75,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <span className="value">{controls.voxelSize.toFixed(1)}m</span>
         </div>
         <p className="control-note">Live view and live IoU. The protocol table stays on 1.0 m cells.</p>
+      </div>
+
+      <div className="control-block">
+        <label htmlFor="occupancy-opacity">Opacity:</label>
+        <div className="slider-row">
+          <input
+            id="occupancy-opacity"
+            type="range"
+            min={0.15}
+            max={1}
+            step={0.05}
+            value={controls.opacity}
+            style={{ ['--fill' as string]: `${opacityFill}%` }}
+            onChange={(e) => onChange({ ...controls, opacity: Number(e.target.value) })}
+          />
+          <span className="value">{controls.opacity.toFixed(2)}</span>
+        </div>
+        <p className="control-note">Fades the occupancy cubes. Protocol false positives and misses stay solid.</p>
       </div>
 
       <div className="control-block">
@@ -147,6 +177,26 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => onGhostEnabledChange(!ghostOn)}
           >
             GT Ghost
+          </button>
+          <button
+            type="button"
+            className="discrepancy-btn"
+            aria-pressed={falsePositiveOn}
+            aria-label="Show 1.0 m false positives"
+            style={falsePositiveOn ? { borderColor: FALSE_POSITIVE_COLOR } : undefined}
+            onClick={() => onFalsePositiveEnabledChange(!falsePositiveOn)}
+          >
+            False positive
+          </button>
+          <button
+            type="button"
+            className="discrepancy-btn"
+            aria-pressed={missOn}
+            aria-label="Show 1.0 m misses"
+            style={missOn ? { borderColor: MISS_COLOR } : undefined}
+            onClick={() => onMissEnabledChange(!missOn)}
+          >
+            Miss
           </button>
         </div>
       </div>

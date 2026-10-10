@@ -46,6 +46,7 @@ export interface SceneManifest {
 export interface ControlsState {
   voxelSize: number;
   threshold: number;
+  opacity: number;
   layers: Record<SemanticClass, boolean>;
 }
 

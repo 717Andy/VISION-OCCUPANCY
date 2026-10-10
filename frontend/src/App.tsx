@@ -92,8 +92,12 @@ const GROUND_TRUTH = 'Ground truth';
 const DEFAULT_CONTROLS: ControlsState = {
   voxelSize: 0.2,
   threshold: 0.38,
+  opacity: 1,
   layers: { driveable: true, vehicle: true, pedestrian: true },
 };
+
+const FALSE_POSITIVE_COLOR = '#ff5d73';
+const MISS_COLOR = '#e6d35a';
 
 export const App: React.FC = () => {
   const [controls, setControls] = useState<ControlsState>(DEFAULT_CONTROLS);
@@ -117,6 +121,8 @@ export const App: React.FC = () => {
   const [freeOn, setFreeOn] = useState(false);
   const [unknownOn, setUnknownOn] = useState(false);
   const [gtGhostOn, setGtGhostOn] = useState(false);
+  const [falsePositiveOn, setFalsePositiveOn] = useState(false);
+  const [missOn, setMissOn] = useState(false);
   const [scoringModel, setScoringModel] = useState('Monocular depth');
   const [leftSource, setLeftSource] = useState(GROUND_TRUTH);
   const [rightSource, setRightSource] = useState('Monocular depth');
@@ -138,7 +144,14 @@ export const App: React.FC = () => {
   const unknownVoxelsRef = useRef<VoxelData[]>([]);
   const orbitRef = useRef(createSharedOrbit());
   const wsRef = useRef<WebSocket | null>(null);
-  const pendingFrameRef = useRef<{ buffer: ArrayBuffer; compareCount: number } | null>(null);
+  const pendingFrameRef = useRef<{
+    buffer: ArrayBuffer;
+    compareCount: number;
+    protocolFpCount: number;
+    protocolFnCount: number;
+    compareFpCount: number;
+    compareFnCount: number;
+  } | null>(null);
   const rafRef = useRef<number>(0);
   const thresholdRef = useRef(controls.threshold);
   const voxelSizeRef = useRef(controls.voxelSize);
@@ -146,6 +159,15 @@ export const App: React.FC = () => {
   const modelRef = useRef(scoringModel);
   const compareModelRef = useRef<string | null>(null);
   const compareCountRef = useRef(0);
+  const protocolFpCountRef = useRef(0);
+  const protocolFnCountRef = useRef(0);
+  const compareFpCountRef = useRef(0);
+  const compareFnCountRef = useRef(0);
+  const protocolFpRef = useRef<VoxelData[]>([]);
+  const protocolFnRef = useRef<VoxelData[]>([]);
+  const compareFpRef = useRef<VoxelData[]>([]);
+  const compareFnRef = useRef<VoxelData[]>([]);
+  const emptyVoxelsRef = useRef<VoxelData[]>([]);
   thresholdRef.current = controls.threshold;
   voxelSizeRef.current = controls.voxelSize;
   frameIndexRef.current = frameIndex;
@@ -207,8 +229,8 @@ export const App: React.FC = () => {
       sendOccupancyConfig(ws);
     };
 
-    const decodeVoxels = (floats: Float32Array, count: number): VoxelData[] => {
-      const stride = Math.max(1, Math.ceil(count / 900));
+    const decodeVoxels = (floats: Float32Array, count: number, maxKeep = 900): VoxelData[] => {
+      const stride = Math.max(1, Math.ceil(count / maxKeep));
       const kept = Math.ceil(count / stride);
       const voxelList: VoxelData[] = new Array(kept);
       let written = 0;
@@ -224,7 +246,14 @@ export const App: React.FC = () => {
       return voxelList;
     };
 
-    const consumeFrame = (buffer: ArrayBuffer, compareCount: number) => {
+    const consumeFrame = (
+      buffer: ArrayBuffer,
+      compareCount: number,
+      protocolFpCount: number,
+      protocolFnCount: number,
+      compareFpCount: number,
+      compareFnCount: number,
+    ) => {
       if (buffer.byteLength < 20) return;
       const header = new Uint32Array(buffer, 0, 5);
       const predCount = header[0];
@@ -258,9 +287,23 @@ export const App: React.FC = () => {
       if (compareCount > 0 && buffer.byteLength >= offset + compareBytes) {
         const compareFloats = new Float32Array(buffer, offset, compareCount * 4);
         compareVoxelsRef.current = decodeVoxels(compareFloats, compareCount);
+        offset += compareBytes;
       } else {
         compareVoxelsRef.current = [];
       }
+      const takeProtocol = (count: number) => {
+        const bytes = count * 16;
+        if (count > 0 && buffer.byteLength >= offset + bytes) {
+          const floats = new Float32Array(buffer, offset, count * 4);
+          offset += bytes;
+          return decodeVoxels(floats, count, 4000);
+        }
+        return [];
+      };
+      protocolFpRef.current = takeProtocol(protocolFpCount);
+      protocolFnRef.current = takeProtocol(protocolFnCount);
+      compareFpRef.current = takeProtocol(compareFpCount);
+      compareFnRef.current = takeProtocol(compareFnCount);
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -284,9 +327,17 @@ export const App: React.FC = () => {
             };
             benchmark?: BenchmarkTableData | null;
             compare_count?: number;
+            protocol_fp_count?: number;
+            protocol_fn_count?: number;
+            compare_fp_count?: number;
+            compare_fn_count?: number;
           };
           if (msg.type === 'occupancy_meta') {
             compareCountRef.current = typeof msg.compare_count === 'number' ? msg.compare_count : 0;
+            protocolFpCountRef.current = typeof msg.protocol_fp_count === 'number' ? msg.protocol_fp_count : 0;
+            protocolFnCountRef.current = typeof msg.protocol_fn_count === 'number' ? msg.protocol_fn_count : 0;
+            compareFpCountRef.current = typeof msg.compare_fp_count === 'number' ? msg.compare_fp_count : 0;
+            compareFnCountRef.current = typeof msg.compare_fn_count === 'number' ? msg.compare_fn_count : 0;
             const elapsed =
               msg.elapsed_ms ?? (msg.depth_ms ?? 0) + (msg.project_ms ?? 0);
             setLatencyMs(elapsed);
@@ -313,13 +364,29 @@ export const App: React.FC = () => {
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return;
-      pendingFrameRef.current = { buffer: event.data, compareCount: compareCountRef.current };
+      pendingFrameRef.current = {
+        buffer: event.data,
+        compareCount: compareCountRef.current,
+        protocolFpCount: protocolFpCountRef.current,
+        protocolFnCount: protocolFnCountRef.current,
+        compareFpCount: compareFpCountRef.current,
+        compareFnCount: compareFnCountRef.current,
+      };
       if (rafRef.current) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = 0;
         const pending = pendingFrameRef.current;
         pendingFrameRef.current = null;
-        if (pending) consumeFrame(pending.buffer, pending.compareCount);
+        if (pending) {
+          consumeFrame(
+            pending.buffer,
+            pending.compareCount,
+            pending.protocolFpCount,
+            pending.protocolFnCount,
+            pending.compareFpCount,
+            pending.compareFnCount,
+          );
+        }
       });
     };
 
@@ -417,6 +484,7 @@ export const App: React.FC = () => {
       onModelChange={onSource}
       voxelsRef={cloudFor(source)}
       voxelSize={controls.voxelSize}
+      opacity={controls.opacity}
       layers={controls.layers}
       selected={selected}
       onSelect={(voxel) => handleSelectVoxel(voxel, source === GROUND_TRUTH ? 'lidar' : 'prediction')}
@@ -432,6 +500,14 @@ export const App: React.FC = () => {
       unknownEnabled={unknownOn}
       ghostRef={gtVoxelsRef}
       ghostEnabled={gtGhostOn && source !== GROUND_TRUTH}
+      falsePositiveRef={
+        compareModel && source === compareModel ? compareFpRef : source === GROUND_TRUTH ? emptyVoxelsRef : protocolFpRef
+      }
+      falsePositiveEnabled={falsePositiveOn && source !== GROUND_TRUTH}
+      missRef={
+        compareModel && source === compareModel ? compareFnRef : source === GROUND_TRUTH ? emptyVoxelsRef : protocolFnRef
+      }
+      missEnabled={missOn && source !== GROUND_TRUTH}
     />
   );
 
@@ -475,6 +551,10 @@ export const App: React.FC = () => {
             onUnknownEnabledChange={setUnknownOn}
             ghostOn={gtGhostOn}
             onGhostEnabledChange={setGtGhostOn}
+            falsePositiveOn={falsePositiveOn}
+            onFalsePositiveEnabledChange={setFalsePositiveOn}
+            missOn={missOn}
+            onMissEnabledChange={setMissOn}
           />
         )}
         {selected && !settingsOpen && (
