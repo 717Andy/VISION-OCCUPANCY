@@ -25,6 +25,7 @@ interface VoxelCanvasProps {
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
   opacity?: number;
+  maxRange?: number;
   layers: Record<SemanticClass, boolean>;
   selected: SelectedVoxel | null;
   onSelect: (voxel: VoxelData | null) => void;
@@ -53,6 +54,10 @@ interface VoxelCanvasProps {
 }
 
 const MAX_INSTANCES = 900;
+
+function inRange(voxel: { x: number; y: number }, maxRange: number): boolean {
+  return Math.hypot(voxel.x, voxel.y) <= maxRange;
+}
 // A real click drifts a few pixels, and these cubes are only a handful of
 // pixels across. Treat that as a click on whatever the press hit. A longer
 // move is an orbit drag and should not open or close the inspector.
@@ -112,23 +117,27 @@ const VoxelInstances: React.FC<{
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
   opacity: number;
+  maxRange: number;
   layers: Record<SemanticClass, boolean>;
   selected: VoxelData | null;
   onSelect: (voxel: VoxelData | null) => void;
   claimRef: MutableRefObject<PressClaim | null>;
-}> = ({ voxelsRef, voxelSize, opacity, layers, selected, onSelect, claimRef }) => {
+}> = ({ voxelsRef, voxelSize, opacity, maxRange, layers, selected, onSelect, claimRef }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const visibleRef = useRef<VoxelData[]>([]);
   const layersRef = useRef(layers);
   const sizeRef = useRef(voxelSize);
   const opacityRef = useRef(opacity);
+  const rangeRef = useRef(maxRange);
   const selectedRef = useRef(selected);
   const lastVoxelsRef = useRef<VoxelData[] | null>(null);
   const lastSelectedRef = useRef<VoxelData | null>(null);
   const lastOpacityRef = useRef<number | null>(null);
+  const lastRangeRef = useRef(maxRange);
   layersRef.current = layers;
   sizeRef.current = voxelSize;
   opacityRef.current = opacity;
+  rangeRef.current = maxRange;
   selectedRef.current = selected;
 
   useFrame(() => {
@@ -146,15 +155,18 @@ const VoxelInstances: React.FC<{
 
     const voxelsNow = voxelsRef.current;
     const selectedNow = selectedRef.current;
+    const rangeNow = rangeRef.current;
     const voxelsChanged = voxelsNow !== lastVoxelsRef.current;
     const selectionChanged = selectedNow !== lastSelectedRef.current;
-    if (!voxelsChanged && !selectionChanged) return;
+    const rangeChanged = rangeNow !== lastRangeRef.current;
+    if (!voxelsChanged && !selectionChanged && !rangeChanged) return;
 
-    if (voxelsChanged) {
+    if (voxelsChanged || rangeChanged) {
       lastVoxelsRef.current = voxelsNow;
+      lastRangeRef.current = rangeNow;
       const layersNow = layersRef.current;
       const sizeNow = sizeRef.current;
-      const visible = voxelsNow.filter((voxel) => layersNow[voxel.cls]);
+      const visible = voxelsNow.filter((voxel) => layersNow[voxel.cls] && inRange(voxel, rangeNow));
       visibleRef.current = visible;
 
       const count = Math.min(visible.length, MAX_INSTANCES);
@@ -226,15 +238,17 @@ const VoxelInstances: React.FC<{
 const DiscrepancyOverlay: React.FC<{
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
+  maxRange: number;
   enabled: boolean;
   colorHex: string;
   selected: VoxelData | null;
   claimRef: MutableRefObject<PressClaim | null>;
   onSelect: (voxel: VoxelData | null) => void;
-}> = ({ voxelsRef, voxelSize, enabled, colorHex, selected, claimRef, onSelect }) => {
+}> = ({ voxelsRef, voxelSize, maxRange, enabled, colorHex, selected, claimRef, onSelect }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const visibleRef = useRef<VoxelData[]>([]);
   const sizeRef = useRef(voxelSize);
+  const rangeRef = useRef(maxRange);
   const enabledRef = useRef(enabled);
   const colorRef = useRef(colorHex);
   const selectedRef = useRef(selected);
@@ -242,7 +256,9 @@ const DiscrepancyOverlay: React.FC<{
   const lastEnabledRef = useRef(enabled);
   const lastColorRef = useRef(colorHex);
   const lastSelectedRef = useRef<VoxelData | null>(null);
+  const lastRangeRef = useRef(maxRange);
   sizeRef.current = voxelSize;
+  rangeRef.current = maxRange;
   enabledRef.current = enabled;
   colorRef.current = colorHex;
   selectedRef.current = selected;
@@ -254,15 +270,18 @@ const DiscrepancyOverlay: React.FC<{
     const enabledNow = enabledRef.current;
     const colorNow = colorRef.current;
     const selectedNow = selectedRef.current;
+    const rangeNow = rangeRef.current;
     const voxelsChanged = voxelsNow !== lastVoxelsRef.current;
     const enabledChanged = enabledNow !== lastEnabledRef.current;
     const colorChanged = colorNow !== lastColorRef.current;
     const selectionChanged = selectedNow !== lastSelectedRef.current;
-    if (!voxelsChanged && !enabledChanged && !colorChanged && !selectionChanged) return;
+    const rangeChanged = rangeNow !== lastRangeRef.current;
+    if (!voxelsChanged && !enabledChanged && !colorChanged && !selectionChanged && !rangeChanged) return;
 
     lastEnabledRef.current = enabledNow;
     lastColorRef.current = colorNow;
     lastSelectedRef.current = selectedNow;
+    lastRangeRef.current = rangeNow;
     if (!enabledNow) {
       mesh.count = 0;
       visibleRef.current = [];
@@ -270,9 +289,9 @@ const DiscrepancyOverlay: React.FC<{
       return;
     }
 
-    if (voxelsChanged || enabledChanged) {
+    if (voxelsChanged || enabledChanged || rangeChanged) {
       lastVoxelsRef.current = voxelsNow;
-      const visible = voxelsNow;
+      const visible = voxelsNow.filter((voxel) => inRange(voxel, rangeNow));
       visibleRef.current = visible;
       const count = Math.min(visible.length, MAX_INSTANCES);
       mesh.count = count;
@@ -336,18 +355,22 @@ const GHOST_COLOR = '#c5d4e0';
 const GhostOverlay: React.FC<{
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
+  maxRange: number;
   enabled: boolean;
   layers: Record<SemanticClass, boolean>;
-}> = ({ voxelsRef, voxelSize, enabled, layers }) => {
+}> = ({ voxelsRef, voxelSize, maxRange, enabled, layers }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const sizeRef = useRef(voxelSize);
+  const rangeRef = useRef(maxRange);
   const enabledRef = useRef(enabled);
   const layersRef = useRef(layers);
   const lastVoxelsRef = useRef<VoxelData[] | null>(null);
   const lastEnabledRef = useRef(enabled);
   const lastLayersRef = useRef(layers);
   const lastSizeRef = useRef(voxelSize);
+  const lastRangeRef = useRef(maxRange);
   sizeRef.current = voxelSize;
+  rangeRef.current = maxRange;
   enabledRef.current = enabled;
   layersRef.current = layers;
 
@@ -358,22 +381,25 @@ const GhostOverlay: React.FC<{
     const enabledNow = enabledRef.current;
     const layersNow = layersRef.current;
     const sizeNow = sizeRef.current;
+    const rangeNow = rangeRef.current;
     const voxelsChanged = voxelsNow !== lastVoxelsRef.current;
     const enabledChanged = enabledNow !== lastEnabledRef.current;
     const layersChanged = layersNow !== lastLayersRef.current;
     const sizeChanged = sizeNow !== lastSizeRef.current;
-    if (!voxelsChanged && !enabledChanged && !layersChanged && !sizeChanged) return;
+    const rangeChanged = rangeNow !== lastRangeRef.current;
+    if (!voxelsChanged && !enabledChanged && !layersChanged && !sizeChanged && !rangeChanged) return;
 
     lastEnabledRef.current = enabledNow;
     lastLayersRef.current = layersNow;
     lastVoxelsRef.current = voxelsNow;
     lastSizeRef.current = sizeNow;
+    lastRangeRef.current = rangeNow;
     if (!enabledNow) {
       mesh.count = 0;
       return;
     }
 
-    const visible = voxelsNow.filter((voxel) => layersNow[voxel.cls]);
+    const visible = voxelsNow.filter((voxel) => layersNow[voxel.cls] && inRange(voxel, rangeNow));
     const count = Math.min(visible.length, MAX_INSTANCES);
     mesh.count = count;
     const scale = Math.max(sizeNow, 0.12) * 1.02;
@@ -455,6 +481,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   voxelsRef,
   voxelSize,
   opacity = 1,
+  maxRange = 50,
   layers,
   selected,
   onSelect,
@@ -533,6 +560,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             voxelsRef={voxelsRef}
             voxelSize={voxelSize}
             opacity={opacity}
+            maxRange={maxRange}
             layers={layers}
             selected={selected?.voxel ?? null}
             onSelect={onSelect}
@@ -543,6 +571,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             <GhostOverlay
               voxelsRef={ghostRef}
               voxelSize={voxelSize}
+              maxRange={maxRange}
               enabled={ghostEnabled}
               layers={layers}
             />
@@ -552,6 +581,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             <DiscrepancyOverlay
               voxelsRef={missRef}
               voxelSize={1}
+              maxRange={maxRange}
               enabled={missEnabled}
               colorHex="#e6d35a"
               selected={selected?.voxel ?? null}
@@ -563,6 +593,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             <DiscrepancyOverlay
               voxelsRef={falsePositiveRef}
               voxelSize={1}
+              maxRange={maxRange}
               enabled={falsePositiveEnabled}
               colorHex="#ff5d73"
               selected={selected?.voxel ?? null}
@@ -575,6 +606,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             <DiscrepancyOverlay
               voxelsRef={discrepancyRef}
               voxelSize={voxelSize}
+              maxRange={maxRange}
               enabled={discrepancyEnabled}
               colorHex={discrepancyColor}
               selected={selected?.voxel ?? null}
@@ -586,6 +618,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             <DiscrepancyOverlay
               voxelsRef={freeRef}
               voxelSize={voxelSize}
+              maxRange={maxRange}
               enabled={freeEnabled}
               colorHex="#9aa4b2"
               selected={selected?.voxel ?? null}
@@ -597,6 +630,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             <DiscrepancyOverlay
               voxelsRef={unknownRef}
               voxelSize={voxelSize}
+              maxRange={maxRange}
               enabled={unknownEnabled}
               colorHex="#3d4450"
               selected={selected?.voxel ?? null}
