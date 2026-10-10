@@ -24,6 +24,7 @@ type PressClaim = { voxel: VoxelData; stamp: number };
 interface VoxelCanvasProps {
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
+  opacity?: number;
   layers: Record<SemanticClass, boolean>;
   selected: SelectedVoxel | null;
   onSelect: (voxel: VoxelData | null) => void;
@@ -42,6 +43,10 @@ interface VoxelCanvasProps {
   unknownEnabled?: boolean;
   ghostRef?: MutableRefObject<VoxelData[]>;
   ghostEnabled?: boolean;
+  falsePositiveRef?: MutableRefObject<VoxelData[]>;
+  falsePositiveEnabled?: boolean;
+  missRef?: MutableRefObject<VoxelData[]>;
+  missEnabled?: boolean;
   models?: string[];
   activeModel?: string;
   onModelChange?: (model: string) => void;
@@ -106,25 +111,38 @@ const PickGesture: React.FC<{
 const VoxelInstances: React.FC<{
   voxelsRef: MutableRefObject<VoxelData[]>;
   voxelSize: number;
+  opacity: number;
   layers: Record<SemanticClass, boolean>;
   selected: VoxelData | null;
   onSelect: (voxel: VoxelData | null) => void;
   claimRef: MutableRefObject<PressClaim | null>;
-}> = ({ voxelsRef, voxelSize, layers, selected, onSelect, claimRef }) => {
+}> = ({ voxelsRef, voxelSize, opacity, layers, selected, onSelect, claimRef }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const visibleRef = useRef<VoxelData[]>([]);
   const layersRef = useRef(layers);
   const sizeRef = useRef(voxelSize);
+  const opacityRef = useRef(opacity);
   const selectedRef = useRef(selected);
   const lastVoxelsRef = useRef<VoxelData[] | null>(null);
   const lastSelectedRef = useRef<VoxelData | null>(null);
+  const lastOpacityRef = useRef<number | null>(null);
   layersRef.current = layers;
   sizeRef.current = voxelSize;
+  opacityRef.current = opacity;
   selectedRef.current = selected;
 
   useFrame(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
+    const opacityNow = opacityRef.current;
+    if (opacityNow !== lastOpacityRef.current) {
+      lastOpacityRef.current = opacityNow;
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      material.opacity = opacityNow;
+      material.transparent = opacityNow < 0.999;
+      material.depthWrite = opacityNow >= 0.999;
+      material.needsUpdate = true;
+    }
 
     const voxelsNow = voxelsRef.current;
     const selectedNow = selectedRef.current;
@@ -436,6 +454,7 @@ const SyncedOrbitControls: React.FC<{
 export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   voxelsRef,
   voxelSize,
+  opacity = 1,
   layers,
   selected,
   onSelect,
@@ -454,6 +473,10 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   unknownEnabled = false,
   ghostRef,
   ghostEnabled = false,
+  falsePositiveRef,
+  falsePositiveEnabled = false,
+  missRef,
+  missEnabled = false,
   models,
   activeModel,
   onModelChange,
@@ -509,6 +532,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
             key={layerKey}
             voxelsRef={voxelsRef}
             voxelSize={voxelSize}
+            opacity={opacity}
             layers={layers}
             selected={selected?.voxel ?? null}
             onSelect={onSelect}
@@ -521,6 +545,29 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
               voxelSize={voxelSize}
               enabled={ghostEnabled}
               layers={layers}
+            />
+          )}
+
+          {missRef && (
+            <DiscrepancyOverlay
+              voxelsRef={missRef}
+              voxelSize={1}
+              enabled={missEnabled}
+              colorHex="#e6d35a"
+              selected={selected?.voxel ?? null}
+              claimRef={claimRef}
+              onSelect={selectOverlay}
+            />
+          )}
+          {falsePositiveRef && (
+            <DiscrepancyOverlay
+              voxelsRef={falsePositiveRef}
+              voxelSize={1}
+              enabled={falsePositiveEnabled}
+              colorHex="#ff5d73"
+              selected={selected?.voxel ?? null}
+              claimRef={claimRef}
+              onSelect={selectOverlay}
             />
           )}
 

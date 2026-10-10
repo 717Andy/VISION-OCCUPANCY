@@ -245,13 +245,28 @@ async def occupancy_websocket(websocket: WebSocket):
                 start_time = time.perf_counter()
 
                 def build_frame():
-                    payload = pipeline.occupancy_for_frame(idx, vs, th, selected)
-                    if not compare or compare == selected:
-                        return payload, 0
-                    extra = pipeline.prediction_block(idx, vs, th, compare)
-                    return payload + extra, len(extra) // 16
+                    from benchmark import pack_protocol_errors
 
-                payload, compare_count = await asyncio.to_thread(build_frame)
+                    payload = pipeline.occupancy_for_frame(idx, vs, th, selected)
+                    compare_count = 0
+                    if compare and compare != selected:
+                        extra = pipeline.prediction_block(idx, vs, th, compare)
+                        payload = payload + extra
+                        compare_count = len(extra) // 16
+                    protocol, fp_count, fn_count = pack_protocol_errors(selected, idx)
+                    compare_fp_count = 0
+                    compare_fn_count = 0
+                    compare_protocol = b""
+                    if compare and compare != selected:
+                        compare_protocol, compare_fp_count, compare_fn_count = pack_protocol_errors(
+                            compare, idx
+                        )
+                    payload = payload + protocol + compare_protocol
+                    return payload, compare_count, fp_count, fn_count, compare_fp_count, compare_fn_count
+
+                payload, compare_count, fp_count, fn_count, compare_fp_count, compare_fn_count = (
+                    await asyncio.to_thread(build_frame)
+                )
                 elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                 await websocket.send_text(
                     json.dumps(
@@ -269,6 +284,10 @@ async def occupancy_websocket(websocket: WebSocket):
                             "benchmark": pipeline.last_benchmark,
                             "compare_model": compare or None,
                             "compare_count": compare_count,
+                            "protocol_fp_count": fp_count,
+                            "protocol_fn_count": fn_count,
+                            "compare_fp_count": compare_fp_count,
+                            "compare_fn_count": compare_fn_count,
                         }
                     )
                 )
