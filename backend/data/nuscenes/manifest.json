@@ -233,7 +233,8 @@
         }
       },
       "time_s": 0.0,
-      "lidar": "lidar/0000.npy"
+      "lidar": "lidar/0000.npy",
+      "lidar_sweeps": 2
     },
     {
       "index": 1,
@@ -435,7 +436,8 @@
         }
       },
       "time_s": 0.500435,
-      "lidar": "lidar/0001.npy"
+      "lidar": "lidar/0001.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 2,
@@ -637,7 +639,8 @@
         }
       },
       "time_s": 1.000303,
-      "lidar": "lidar/0002.npy"
+      "lidar": "lidar/0002.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 3,
@@ -839,7 +842,8 @@
         }
       },
       "time_s": 1.500179,
-      "lidar": "lidar/0003.npy"
+      "lidar": "lidar/0003.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 4,
@@ -1041,7 +1045,8 @@
         }
       },
       "time_s": 2.000602,
-      "lidar": "lidar/0004.npy"
+      "lidar": "lidar/0004.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 5,
@@ -1243,7 +1248,8 @@
         }
       },
       "time_s": 2.50104,
-      "lidar": "lidar/0005.npy"
+      "lidar": "lidar/0005.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 6,
@@ -1445,7 +1451,8 @@
         }
       },
       "time_s": 3.001476,
-      "lidar": "lidar/0006.npy"
+      "lidar": "lidar/0006.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 7,
@@ -1647,7 +1654,8 @@
         }
       },
       "time_s": 3.501343,
-      "lidar": "lidar/0007.npy"
+      "lidar": "lidar/0007.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 8,
@@ -1849,7 +1857,8 @@
         }
       },
       "time_s": 4.001234,
-      "lidar": "lidar/0008.npy"
+      "lidar": "lidar/0008.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 9,
@@ -2051,7 +2060,8 @@
         }
       },
       "time_s": 4.500561,
-      "lidar": "lidar/0009.npy"
+      "lidar": "lidar/0009.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 10,
@@ -2253,7 +2263,8 @@
         }
       },
       "time_s": 5.00043,
-      "lidar": "lidar/0010.npy"
+      "lidar": "lidar/0010.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 11,
@@ -2455,7 +2466,8 @@
         }
       },
       "time_s": 5.5003,
-      "lidar": "lidar/0011.npy"
+      "lidar": "lidar/0011.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 12,
@@ -2657,7 +2669,8 @@
         }
       },
       "time_s": 6.000176,
-      "lidar": "lidar/0012.npy"
+      "lidar": "lidar/0012.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 13,
@@ -2859,7 +2872,8 @@
         }
       },
       "time_s": 6.399435,
-      "lidar": "lidar/0013.npy"
+      "lidar": "lidar/0013.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 14,
@@ -3061,7 +3075,8 @@
         }
       },
       "time_s": 6.899309,
-      "lidar": "lidar/0014.npy"
+      "lidar": "lidar/0014.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 15,
@@ -3263,7 +3278,8 @@
         }
       },
       "time_s": 7.399195,
-      "lidar": "lidar/0015.npy"
+      "lidar": "lidar/0015.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 16,
@@ -3465,7 +3481,8 @@
         }
       },
       "time_s": 7.899046,
-      "lidar": "lidar/0016.npy"
+      "lidar": "lidar/0016.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 17,
@@ -3667,7 +3684,8 @@
         }
       },
       "time_s": 8.349144,
-      "lidar": "lidar/0017.npy"
+      "lidar": "lidar/0017.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 18,
@@ -3869,7 +3887,8 @@
         }
       },
       "time_s": 8.849589,
-      "lidar": "lidar/0018.npy"
+      "lidar": "lidar/0018.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 19,
@@ -4071,7 +4090,8 @@
         }
       },
       "time_s": 9.349998,
-      "lidar": "lidar/0019.npy"
+      "lidar": "lidar/0019.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 20,
@@ -4273,7 +4293,8 @@
         }
       },
       "time_s": 9.85043,
-      "lidar": "lidar/0020.npy"
+      "lidar": "lidar/0020.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 21,
@@ -4475,7 +4496,8 @@
         }
       },
       "time_s": 10.400632,
-      "lidar": "lidar/0021.npy"
+      "lidar": "lidar/0021.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 22,
@@ -4677,7 +4699,8 @@
         }
       },
       "time_s": 10.902574,
-      "lidar": "lidar/0022.npy"
+      "lidar": "lidar/0022.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 23,
@@ -4879,7 +4902,8 @@
         }
       },
       "time_s": 11.400946,
-      "lidar": "lidar/0023.npy"
+      "lidar": "lidar/0023.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 24,
@@ -5081,7 +5105,8 @@
         }
       },
       "time_s": 11.900807,
-      "lidar": "lidar/0024.npy"
+      "lidar": "lidar/0024.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 25,
@@ -5283,7 +5308,8 @@
         }
       },
       "time_s": 12.400143,
-      "lidar": "lidar/0025.npy"
+      "lidar": "lidar/0025.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 26,
@@ -5485,7 +5511,8 @@
         }
       },
       "time_s": 12.900016,
-      "lidar": "lidar/0026.npy"
+      "lidar": "lidar/0026.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 27,
@@ -5687,7 +5714,8 @@
         }
       },
       "time_s": 13.3999,
-      "lidar": "lidar/0027.npy"
+      "lidar": "lidar/0027.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 28,
@@ -5889,7 +5917,8 @@
         }
       },
       "time_s": 13.84946,
-      "lidar": "lidar/0028.npy"
+      "lidar": "lidar/0028.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 29,
@@ -6091,7 +6120,8 @@
         }
       },
       "time_s": 14.399647,
-      "lidar": "lidar/0029.npy"
+      "lidar": "lidar/0029.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 30,
@@ -6293,7 +6323,8 @@
         }
       },
       "time_s": 14.899544,
-      "lidar": "lidar/0030.npy"
+      "lidar": "lidar/0030.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 31,
@@ -6495,7 +6526,8 @@
         }
       },
       "time_s": 15.399403,
-      "lidar": "lidar/0031.npy"
+      "lidar": "lidar/0031.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 32,
@@ -6697,7 +6729,8 @@
         }
       },
       "time_s": 15.899276,
-      "lidar": "lidar/0032.npy"
+      "lidar": "lidar/0032.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 33,
@@ -6899,7 +6932,8 @@
         }
       },
       "time_s": 16.399723,
-      "lidar": "lidar/0033.npy"
+      "lidar": "lidar/0033.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 34,
@@ -7101,7 +7135,8 @@
         }
       },
       "time_s": 16.900155,
-      "lidar": "lidar/0034.npy"
+      "lidar": "lidar/0034.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 35,
@@ -7303,7 +7338,8 @@
         }
       },
       "time_s": 17.500116,
-      "lidar": "lidar/0035.npy"
+      "lidar": "lidar/0035.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 36,
@@ -7505,7 +7541,8 @@
         }
       },
       "time_s": 17.900459,
-      "lidar": "lidar/0036.npy"
+      "lidar": "lidar/0036.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 37,
@@ -7707,7 +7744,8 @@
         }
       },
       "time_s": 18.400338,
-      "lidar": "lidar/0037.npy"
+      "lidar": "lidar/0037.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 38,
@@ -7909,7 +7947,8 @@
         }
       },
       "time_s": 18.901326,
-      "lidar": "lidar/0038.npy"
+      "lidar": "lidar/0038.npy",
+      "lidar_sweeps": 3
     },
     {
       "index": 39,
@@ -8111,8 +8150,10 @@
         }
       },
       "time_s": 19.400637,
-      "lidar": "lidar/0039.npy"
+      "lidar": "lidar/0039.npy",
+      "lidar_sweeps": 2
     }
   ],
-  "ground_truth": "LIDAR_TOP"
+  "ground_truth": "LIDAR_TOP",
+  "lidar_window_us": 75000
 }
