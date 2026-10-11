@@ -203,10 +203,12 @@ export const App: React.FC = () => {
     fetchScenes().then((rows) => {
       const next = rows
         .filter((row) => row.name)
-        .map((row) => ({
-          name: row.name,
-          label: row.location ? `${row.name} · ${row.location}` : row.name,
-        }));
+        .map((row) => {
+          const night = (row.description ?? '').trim().toLowerCase().startsWith('night');
+          const place = (row.location ?? '').replace(/^singapore-/, '');
+          const label = [row.name, place, night ? 'night' : ''].filter(Boolean).join(' · ');
+          return { name: row.name, label };
+        });
       if (next.length > 0) setScenes(next);
     });
     fetchGpuLabel().then(setGpu);
