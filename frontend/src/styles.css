@@ -646,6 +646,31 @@ html, body, #root {
   margin-top: 6px;
 }
 
+.cross-scene h3 {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cross-heading,
+.cross-detail {
+  display: block;
+}
+
+.cross-detail {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.cross-scene td.best {
+  font-weight: 700;
+}
+
+.cross-scene .current {
+  background: rgba(88, 166, 255, 0.12);
+}
+
 .benchmark-card table {
   width: 100%;
   border-collapse: collapse;

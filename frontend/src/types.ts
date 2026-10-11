@@ -102,6 +102,29 @@ export interface BenchmarkTable {
   } | null;
 }
 
+export interface CrossSceneScore {
+  pipeline: string;
+  iou?: number;
+  miou?: number;
+  error?: string;
+}
+
+export interface CrossSceneColumn {
+  name: string;
+  heading: string;
+  detail: string;
+  place: string;
+  label: string;
+  frames: number;
+  training_scene: boolean;
+  scores: CrossSceneScore[];
+}
+
+export interface CrossSceneProtocol {
+  voxel_m: number;
+  scenes: CrossSceneColumn[];
+}
+
 export interface DistanceZone {
   zone: string;
   label: string;

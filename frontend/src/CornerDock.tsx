@@ -130,7 +130,8 @@ export const CornerDock: React.FC<{
   distanceZones: DistanceZone[];
   miouDrop: MiouDrop;
   viewingModel: string;
-}> = ({ table, runs, selectedRun, onSelectRun, distanceZones, miouDrop, viewingModel }) => {
+  scene?: string;
+}> = ({ table, runs, selectedRun, onSelectRun, distanceZones, miouDrop, viewingModel, scene }) => {
   const [benchmarkOpen, setBenchmarkOpen] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
 
@@ -145,6 +146,7 @@ export const CornerDock: React.FC<{
               selectedRun={selectedRun}
               onSelectRun={onSelectRun}
               viewingModel={viewingModel}
+              scene={scene}
             />
           )}
           {chartOpen && (
