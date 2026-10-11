@@ -85,7 +85,7 @@ def archive_index(tar: tarfile.TarFile) -> tuple[list[tarfile.TarInfo], dict[str
     return json_members, samples_index
 
 
-def extract_clip(tar: tarfile.TarFile) -> dict:
+def extract_clip(tar: tarfile.TarFile, scene_name: str | None = None, dest: Path | None = None) -> dict:
     json_members, samples_index = archive_index(tar)
     EXTRACT_ROOT.mkdir(parents=True, exist_ok=True)
     tar.extractall(EXTRACT_ROOT, members=json_members, filter="data")
@@ -103,7 +103,12 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
     logs = index_by_token(load_table(meta_dir, "log"))
     ego_poses = index_by_token(load_table(meta_dir, "ego_pose"))
 
-    scene = choose_scene(scenes)
+    if scene_name:
+        scene = next(row for row in scenes if row.get("name") == scene_name)
+    else:
+        scene = choose_scene(scenes)
+    dest_root = dest or DATA_ROOT
+    clip_dir = dest_root / "frames"
     scene_samples = collect_samples(samples, scene["token"])
     location = logs.get(scene.get("log_token", ""), {}).get("location", "")
     scene_sample_tokens = {sample["token"] for sample in scene_samples}
@@ -145,7 +150,7 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
     print(f"Extracting {len(unique_needed)} camera JPEGs for {scene.get('name')}...")
     tar.extractall(EXTRACT_ROOT, members=unique_needed, filter="data")
 
-    CLIP_DIR.mkdir(parents=True, exist_ok=True)
+    clip_dir.mkdir(parents=True, exist_ok=True)
     frames: list[dict] = [{"index": i, "timestamp": s["timestamp"], "cameras": {}, "calibration": {}} for i, s in enumerate(scene_samples)]
     first_ts = scene_samples[0]["timestamp"] if scene_samples else 0
 
@@ -160,17 +165,17 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
             print(f"Extracted file missing: {member.name}")
             continue
 
-        frame_dir = CLIP_DIR / f"{index:04d}"
+        frame_dir = clip_dir / f"{index:04d}"
         frame_dir.mkdir(parents=True, exist_ok=True)
-        dest = frame_dir / f"{camera_id}.jpg"
+        image_path = frame_dir / f"{camera_id}.jpg"
         with Image.open(src) as img:
             rgb = img.convert("RGB")
             rgb = rgb.resize(TARGET_SIZE, Image.Resampling.BILINEAR)
-            rgb.save(dest, format="JPEG", quality=82, optimize=True)
+            rgb.save(image_path, format="JPEG", quality=82, optimize=True)
 
         calib = calibrated[row["calibrated_sensor_token"]]
         frames[index]["time_s"] = (frames[index]["timestamp"] - first_ts) / 1e6
-        frames[index]["cameras"][camera_id] = str(dest.relative_to(DATA_ROOT))
+        frames[index]["cameras"][camera_id] = str(image_path.relative_to(dest_root))
         frames[index]["calibration"][camera_id] = {
             "intrinsic": calib.get("camera_intrinsic"),
             "translation": calib.get("translation"),
@@ -178,17 +183,23 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
             "timestamp": row["timestamp"],
         }
 
-    extract_scene_lidar(
-        tar,
-        scene_samples,
-        sample_data_rows,
-        calibrated,
-        sensors,
-        samples_index,
-        frames,
-        ego_poses,
-        scene["token"],
-    )
+    from nuscenes_loader import reset_scene, set_scene
+
+    scene_token_ctx = set_scene(scene["name"])
+    try:
+        extract_scene_lidar(
+            tar,
+            scene_samples,
+            sample_data_rows,
+            calibrated,
+            sensors,
+            samples_index,
+            frames,
+            ego_poses,
+            scene["token"],
+        )
+    finally:
+        reset_scene(scene_token_ctx)
 
     duration_s = frames[-1].get("time_s", 0.0) if frames else 0.0
     sample_hz = 2.0 if duration_s <= 0 else (len(frames) - 1) / duration_s
@@ -203,15 +214,17 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
         "frame_count": len(frames),
         "ground_truth": "LIDAR_TOP",
         "lidar_window_us": SWEEP_WINDOW_US,
+        "training_scene": scene.get("name") == "scene-0103",
         "cameras": [
             {"id": cam, "label": cam.replace("CAM_", "").replace("_", " ").title()}
             for cam in CAMERA_IDS
         ],
         "frames": frames,
     }
-    DATA_ROOT.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
-    print(f"Wrote {len(frames)} frames from {manifest['scene_name']} ({location}) -> {MANIFEST_PATH}")
+    dest_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = dest_root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"Wrote {len(frames)} frames from {manifest['scene_name']} ({location}) -> {manifest_path}")
     return manifest
 
 
@@ -323,7 +336,9 @@ def extract_scene_lidar(
             continue
         stacked = np.concatenate(clouds, axis=0)
         path = save_lidar_ego_points(index, stacked)
-        frames[index]["lidar"] = str(path.relative_to(DATA_ROOT))
+        from nuscenes_loader import scene_root
+
+        frames[index]["lidar"] = str(path.relative_to(scene_root()))
         frames[index]["lidar_sweeps"] = len(clouds)
         print(f"  frame {index:04d}: {len(clouds)} sweeps -> {np.load(path).shape[0]} ego points")
 
@@ -365,6 +380,12 @@ def main() -> None:
     with tarfile.open(ARCHIVE_PATH, "r:*") as tar:
         if "--lidar-only" in sys.argv:
             refresh_lidar(tar)
+        elif "--scene" in sys.argv:
+            name = sys.argv[sys.argv.index("--scene") + 1]
+            if name == "scene-0103":
+                extract_clip(tar)
+            else:
+                extract_clip(tar, scene_name=name, dest=DATA_ROOT / "scenes" / name)
         else:
             extract_clip(tar)
 

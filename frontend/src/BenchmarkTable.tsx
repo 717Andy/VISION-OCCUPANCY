@@ -164,7 +164,7 @@ export const BenchmarkTable: React.FC<{
       </p>
       {held && heldLine && (
         <p className="bench-note">
-          Held-out micro ({held.frames} frames): {heldLine}
+          {held.label || 'Held-out'} micro ({held.frames} frames): {heldLine}
         </p>
       )}
         </>

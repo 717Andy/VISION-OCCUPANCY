@@ -48,7 +48,13 @@ def monocular_centers(frame_index: int, threshold: float) -> np.ndarray:
     payloads: list[dict[str, Any]] = []
     for camera_id in CAMERA_IDS:
         sample = synced.cameras[camera_id]
-        cache_path = DEPTH_CACHE_ROOT / f"{int(frame_index):04d}" / f"{camera_id}.npy"
+        from nuscenes_loader import TRAINING_SCENE, get_scene
+
+        scene = get_scene()
+        if scene == TRAINING_SCENE:
+            cache_path = DEPTH_CACHE_ROOT / f"{int(frame_index):04d}" / f"{camera_id}.npy"
+        else:
+            cache_path = DEPTH_CACHE_ROOT / scene / f"{int(frame_index):04d}" / f"{camera_id}.npy"
         if not cache_path.is_file():
             raise FileNotFoundError(f"Missing depth cache {cache_path}")
         payloads.append(
@@ -100,7 +106,9 @@ _PROTOCOL_CACHE_LIMIT = 24
 
 def protocol_false_and_miss(model: str, frame_index: int) -> tuple[np.ndarray, np.ndarray]:
     """1.0 m false-positive and miss centers for one registered model."""
-    key = (int(frame_index), str(model))
+    from nuscenes_loader import get_scene
+
+    key = (get_scene(), int(frame_index), str(model))
     cached = _PROTOCOL_CACHE.get(key)
     if cached is not None:
         return cached
@@ -262,21 +270,39 @@ def registered_predictors() -> list[tuple[str, Any, Any]]:
     ]
 
 
-_HELDOUT: dict[str, Any] | None = None
+_HELDOUT_BY_SCENE: dict[str, dict[str, Any]] = {}
 
 
 def comparison_heldout() -> dict[str, Any]:
-    """Held-out scores for every predictor that can run. Cached for the process."""
-    global _HELDOUT
-    if _HELDOUT is not None:
-        return _HELDOUT
-    from nuscenes_loader import load_manifest
+    """Protocol scores for the active scene. Cached per scene for the process."""
+    from nuscenes_loader import TRAINING_SCENE, get_scene, load_manifest, scene_root
 
-    count = int(load_manifest().get("frame_count", 0))
-    frame_ids = [index for index in range(count) if held_out(index)]
+    scene = get_scene()
+    cached = _HELDOUT_BY_SCENE.get(scene)
+    if cached is not None:
+        return cached
+    disk = scene_root() / "protocol_summary.json"
+    if disk.is_file():
+        summary = json.loads(disk.read_text())
+        _HELDOUT_BY_SCENE[scene] = summary
+        return summary
+    manifest = load_manifest()
+    training = bool(manifest.get("training_scene", scene == TRAINING_SCENE))
+    count = int(manifest.get("frame_count", 0))
+    if training:
+        frame_ids = [index for index in range(count) if held_out(index)]
+        label = "Held-out"
+    else:
+        frame_ids = list(range(count))
+        label = "Unseen"
+        scores = _score_every_predictor(frame_ids)
+        summary = {"scene": scene, "frames": len(frame_ids), "label": label, "scores": scores}
+        disk.write_text(json.dumps(summary))
+        _HELDOUT_BY_SCENE[scene] = summary
+        return summary
     scores: list[dict[str, Any]] = []
     runtime = load_baseline()
-    stored = runtime.get("heldout")
+    stored = runtime.get("heldout") if training else None
     if isinstance(stored, dict):
         for key, pipeline in (("monocular", MONOCULAR_NAME), ("voxnet", VOXNET_NAME)):
             row = stored.get(key)
@@ -316,8 +342,41 @@ def comparison_heldout() -> dict[str, Any]:
         scores.append({"pipeline": ray_name, "iou": summary["iou"], "miou": summary["miou"]})
     except Exception as exc:
         scores.append({"pipeline": "Ray surface", "error": str(exc)})
-    _HELDOUT = {"frames": len(frame_ids), "scores": scores}
-    return _HELDOUT
+    summary = {"scene": scene, "frames": len(frame_ids), "label": label, "scores": scores}
+    _HELDOUT_BY_SCENE[scene] = summary
+    return summary
+
+
+def _score_every_predictor(frame_ids: list[int]) -> list[dict[str, Any]]:
+    """Score each registered model. Used for scenes none of them were trained on."""
+    scores: list[dict[str, Any]] = []
+    for name, predict, _identity in registered_predictors():
+        try:
+            summary = micro_summary(lambda frame, predict=predict: predict(frame, 0.38), frame_ids)
+        except Exception as exc:
+            scores.append({"pipeline": name, "error": str(exc)})
+            continue
+        scores.append(
+            {
+                "pipeline": name,
+                "iou": summary["iou"],
+                "miou": summary["miou"],
+                "tp": summary["tp"],
+                "fp": summary["fp"],
+                "fn": summary["fn"],
+            }
+        )
+    return scores
+
+
+def _frame_split(frame_index: int) -> str:
+    from nuscenes_loader import TRAINING_SCENE, get_scene, load_manifest
+
+    scene = get_scene()
+    training = bool(load_manifest().get("training_scene", scene == TRAINING_SCENE))
+    if not training:
+        return "unseen"
+    return "held-out" if held_out(frame_index) else "train"
 
 
 def build_frame_benchmark(frame_index: int, threshold: float) -> dict[str, Any]:
@@ -340,16 +399,22 @@ def build_frame_benchmark(frame_index: int, threshold: float) -> dict[str, Any]:
             rows.append({"pipeline": name, "error": str(exc)})
     runtime = load_baseline()
     stored = runtime.get("heldout")
-    heldout: dict[str, Any] = dict(stored) if isinstance(stored, dict) else {}
     summary = comparison_heldout()
+    # The checkpoint's held-out blob belongs to the training clip only.
+    if summary.get("label") == "Unseen":
+        heldout: dict[str, Any] = {}
+    else:
+        heldout = dict(stored) if isinstance(stored, dict) else {}
     heldout["frames"] = summary["frames"]
     heldout["scores"] = summary["scores"]
+    if summary.get("label"):
+        heldout["label"] = summary["label"]
     return {
         "voxel_m": float(BENCH_VOXEL_M),
         "tolerance_cells": 0,
         "unknown": "ignored",
         "frame_index": index,
-        "split": "held-out" if held_out(index) else "train",
+        "split": _frame_split(index),
         "monocular_threshold": float(threshold),
         "voxnet_threshold": float(runtime["threshold"]),
         "checkpoint_id": checkpoint_id(),

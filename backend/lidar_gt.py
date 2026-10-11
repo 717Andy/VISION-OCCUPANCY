@@ -9,7 +9,10 @@ import numpy as np
 from nuscenes_loader import CAMERA_IDS, DATA_ROOT, load_synchronized_frame
 from projection import EGO_BOUNDS, camera_to_ego, camera_visible_points, quat_to_rotmat
 
-LIDAR_DIR = DATA_ROOT / "lidar"
+def _lidar_dir() -> Path:
+    from nuscenes_loader import scene_root
+
+    return scene_root() / "lidar"
 # Store one point per cell so the clip stays small and still finer than the UI voxels.
 STORE_VOXEL_M = 0.1
 MAX_STORED_POINTS = 80_000
@@ -18,7 +21,7 @@ SWEEP_WINDOW_US = 75_000
 
 
 def lidar_path(frame_index: int) -> Path:
-    return LIDAR_DIR / f"{int(frame_index):04d}.npy"
+    return _lidar_dir() / f"{int(frame_index):04d}.npy"
 
 
 def camera_space_lidar(frame_index: int, points: np.ndarray | None = None) -> np.ndarray:

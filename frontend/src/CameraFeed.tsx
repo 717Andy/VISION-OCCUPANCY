@@ -15,6 +15,9 @@ const LAYOUT: { id: string; className: string; fallback: string }[] = [
 interface CameraFeedProps {
   manifest: SceneManifest | null;
   frameIndex: number;
+  scene?: string;
+  scenes: { name: string; label: string }[];
+  onSceneChange: (scene: string) => void;
   settingsOpen: boolean;
   onToggleSettings: () => void;
   highlightCamera?: string | null;
@@ -36,6 +39,9 @@ function formatCamOffset(sampleTs: number, camTs: number): string {
 export const CameraFeed: React.FC<CameraFeedProps> = ({
   manifest,
   frameIndex,
+  scene,
+  scenes,
+  onSceneChange,
   settingsOpen,
   onToggleSettings,
   highlightCamera,
@@ -110,7 +116,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               >
                 {path ? (
                   <img
-                    src={cameraFrameUrl(frameIndex, cam.id)}
+                    src={cameraFrameUrl(frameIndex, cam.id, scene)}
                     alt={`${cam.fallback} at ${formatSceneTime(timeS)}`}
                     draggable={false}
                   />
@@ -123,10 +129,20 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                     <span className="cam-ts">{formatCamOffset(frame.timestamp, camTs)}</span>
                   )}
                 </span>
-              </article>
-            );
+            </article>
+          );
           })}
         </div>
+        <label className="scene-picker">
+          Scene
+          <select aria-label="nuScenes scene" value={scene ?? ''} onChange={(event) => onSceneChange(event.target.value)}>
+            {scenes.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {expanded && expandedCam && (
           <div className="cam-popup-backdrop" onClick={() => setExpanded(null)}>
             <article
@@ -136,7 +152,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             >
               {frame?.cameras[expandedCam.id] ? (
                 <img
-                  src={cameraFrameUrl(frameIndex, expandedCam.id)}
+                  src={cameraFrameUrl(frameIndex, expandedCam.id, scene)}
                   alt={`${expandedCam.fallback} enlarged`}
                   draggable={false}
                 />

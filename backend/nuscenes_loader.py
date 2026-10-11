@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 from PIL import Image
 
 DATA_ROOT = Path(__file__).resolve().parent / "data" / "nuscenes"
 MANIFEST_PATH = DATA_ROOT / "manifest.json"
+TRAINING_SCENE = "scene-0103"
+_SCENE: ContextVar[str] = ContextVar("nuscenes_scene", default=TRAINING_SCENE)
 
 # Native nuScenes camera resolution; prepared JPEGs are resized copies.
 ORIGINAL_IMAGE_SIZE = (1600, 900)
@@ -54,15 +58,76 @@ class ClipNotPrepared(FileNotFoundError):
     """Raised when the local nuScenes clip has not been extracted yet."""
 
 
-@lru_cache(maxsize=1)
+def get_scene() -> str:
+    return _SCENE.get()
+
+
+def set_scene(name: str) -> object:
+    return _SCENE.set(name)
+
+
+def reset_scene(token: object) -> None:
+    _SCENE.reset(token)  # type: ignore[arg-type]
+
+
+@contextmanager
+def scene_context(name: str | None) -> Iterator[None]:
+    if not name:
+        yield
+        return
+    token = set_scene(name)
+    try:
+        yield
+    finally:
+        reset_scene(token)
+
+
+def scene_root(name: str | None = None) -> Path:
+    """scene-0103 stays at the original data root. Later scenes get a folder."""
+    scene = name or get_scene()
+    if scene == TRAINING_SCENE:
+        return DATA_ROOT
+    return DATA_ROOT / "scenes" / scene
+
+
+def list_scenes() -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    roots = [DATA_ROOT]
+    extra = DATA_ROOT / "scenes"
+    if extra.is_dir():
+        roots.extend(sorted(path for path in extra.iterdir() if path.is_dir()))
+    for root in roots:
+        path = root / "manifest.json"
+        if not path.is_file():
+            continue
+        data = json.loads(path.read_text())
+        name = str(data.get("scene_name") or root.name)
+        found.append(
+            {
+                "name": name,
+                "description": data.get("description") or "",
+                "location": data.get("location") or "",
+                "frame_count": int(data.get("frame_count") or 0),
+                "training_scene": bool(data.get("training_scene", name == TRAINING_SCENE)),
+            }
+        )
+    return found
+
+
+@lru_cache(maxsize=8)
+def _load_manifest(scene: str) -> dict[str, Any]:
+    path = scene_root(scene) / "manifest.json"
+    if not path.exists():
+        raise ClipNotPrepared(f"Missing {path}. Run backend/prepare_nuscenes.py")
+    return json.loads(path.read_text())
+
+
 def load_manifest() -> dict[str, Any]:
-    if not MANIFEST_PATH.exists():
-        raise ClipNotPrepared(f"Missing {MANIFEST_PATH}. Run backend/prepare_nuscenes.py")
-    return json.loads(MANIFEST_PATH.read_text())
+    return _load_manifest(get_scene())
 
 
 def reload_manifest() -> dict[str, Any]:
-    load_manifest.cache_clear()
+    _load_manifest.cache_clear()
     return load_manifest()
 
 
@@ -79,8 +144,9 @@ def resolve_frame_path(frame_index: int, camera_id: str) -> Path:
     if not relative:
         raise FileNotFoundError(f"No image for {camera_id} at frame {frame_index}")
 
-    path = (DATA_ROOT / relative).resolve()
-    if DATA_ROOT.resolve() not in path.parents and path != DATA_ROOT.resolve():
+    path = (scene_root() / relative).resolve()
+    root = scene_root().resolve()
+    if root not in path.parents and path != root:
         raise ValueError("Refusing to serve path outside the nuScenes data root")
     if not path.is_file():
         raise FileNotFoundError(path)

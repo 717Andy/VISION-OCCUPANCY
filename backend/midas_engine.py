@@ -135,7 +135,13 @@ class MidasDepthEngine:
         return depth
 
     def infer_cached(self, frame_index: int, camera_id: str, image_rgb: np.ndarray) -> np.ndarray:
-        cache_path = DEPTH_CACHE_ROOT / f"{frame_index:04d}" / f"{camera_id}.npy"
+        from nuscenes_loader import TRAINING_SCENE, get_scene
+
+        scene = get_scene()
+        if scene == TRAINING_SCENE:
+            cache_path = DEPTH_CACHE_ROOT / f"{frame_index:04d}" / f"{camera_id}.npy"
+        else:
+            cache_path = DEPTH_CACHE_ROOT / scene / f"{frame_index:04d}" / f"{camera_id}.npy"
         if cache_path.is_file():
             depth = np.load(cache_path)
             if depth.ndim == 2 and depth.dtype == np.float32:
