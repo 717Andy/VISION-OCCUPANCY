@@ -1,4 +1,4 @@
-"""A second clip stays off the training-scene paths and off the held-out label."""
+"""Extra clips stay off the training-scene paths and off the held-out label."""
 
 from __future__ import annotations
 
@@ -10,6 +10,18 @@ from nuscenes_loader import DATA_ROOT, TRAINING_SCENE, get_scene, list_scenes, s
 
 
 class SceneRootTests(unittest.TestCase):
+    def test_monocular_depth_is_saved_for_a_later_scene(self):
+        from benchmark import monocular_centers
+        from midas_engine import DEPTH_CACHE_ROOT
+
+        self.assertTrue((DEPTH_CACHE_ROOT / "0000" / "CAM_FRONT.npy").is_file())
+        night = DEPTH_CACHE_ROOT / "scene-1094" / "0000" / "CAM_FRONT.npy"
+        self.assertTrue(night.is_file())
+        with scene_context("scene-1094"):
+            centers = monocular_centers(0, 0.38)
+        self.assertGreater(len(centers), 0)
+        self.assertEqual(get_scene(), TRAINING_SCENE)
+
     def test_training_scene_stays_at_the_original_root(self):
         self.assertEqual(get_scene(), TRAINING_SCENE)
         self.assertEqual(scene_root("scene-0103"), DATA_ROOT)
@@ -17,8 +29,12 @@ class SceneRootTests(unittest.TestCase):
 
     def test_listed_scenes_mark_only_the_training_clip(self):
         names = {row["name"]: row for row in list_scenes()}
-        self.assertIn("scene-0103", names)
-        self.assertTrue(names["scene-0103"]["training_scene"])
+        self.assertEqual(
+            set(names),
+            {"scene-0103", "scene-0061", "scene-0796", "scene-1094"},
+        )
+        training = [name for name, row in names.items() if row["training_scene"]]
+        self.assertEqual(training, ["scene-0103"])
 
     def test_unseen_scene_is_not_called_held_out(self):
         from benchmark import _HELDOUT_BY_SCENE, _frame_split, comparison_heldout

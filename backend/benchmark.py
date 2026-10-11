@@ -15,8 +15,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from midas_engine import DEPTH_CACHE_ROOT
-from nuscenes_loader import CAMERA_IDS, load_synchronized_frame
+from nuscenes_loader import CAMERA_IDS, load_rgb, load_synchronized_frame
 from projection import (
     EGO_BOUNDS,
     HEIGHT_BANDS,
@@ -43,23 +42,22 @@ SCORING = (
 
 
 def monocular_centers(frame_index: int, threshold: float) -> np.ndarray:
-    """Pipeline A: cached MiDaS disparity, unproject with K, voxelize at 1.0 m."""
+    """Pipeline A: MiDaS disparity, unproject with K, voxelize at 1.0 m.
+
+    A saved map is reused. A missing map is created by MiDaS and kept for the
+    next frame, including clips other than the training scene.
+    """
+    from midas_engine import shared_engine
+
     synced = load_synchronized_frame(frame_index)
+    engine = shared_engine()
     payloads: list[dict[str, Any]] = []
     for camera_id in CAMERA_IDS:
         sample = synced.cameras[camera_id]
-        from nuscenes_loader import TRAINING_SCENE, get_scene
-
-        scene = get_scene()
-        if scene == TRAINING_SCENE:
-            cache_path = DEPTH_CACHE_ROOT / f"{int(frame_index):04d}" / f"{camera_id}.npy"
-        else:
-            cache_path = DEPTH_CACHE_ROOT / scene / f"{int(frame_index):04d}" / f"{camera_id}.npy"
-        if not cache_path.is_file():
-            raise FileNotFoundError(f"Missing depth cache {cache_path}")
+        disparity = engine.infer_cached(int(frame_index), camera_id, load_rgb(sample.image_path))
         payloads.append(
             {
-                "disparity": np.load(cache_path),
+                "disparity": disparity,
                 "intrinsic": sample.intrinsic,
                 "translation": sample.translation,
                 "rotation": sample.rotation,
@@ -303,11 +301,28 @@ def comparison_heldout() -> dict[str, Any]:
     scores: list[dict[str, Any]] = []
     runtime = load_baseline()
     stored = runtime.get("heldout") if training else None
+    try:
+        mono = micro_summary(lambda frame: monocular_centers(frame, 0.38), frame_ids)
+        scores.append(
+            {
+                "pipeline": MONOCULAR_NAME,
+                "iou": mono["iou"],
+                "miou": mono["miou"],
+                "tp": mono["tp"],
+                "fp": mono["fp"],
+                "fn": mono["fn"],
+            }
+        )
+    except Exception as exc:
+        row = stored.get("monocular") if isinstance(stored, dict) else None
+        if isinstance(row, dict) and "iou" in row:
+            scores.append({"pipeline": MONOCULAR_NAME, "iou": row.get("iou"), "miou": row.get("miou")})
+        else:
+            scores.append({"pipeline": MONOCULAR_NAME, "error": str(exc)})
     if isinstance(stored, dict):
-        for key, pipeline in (("monocular", MONOCULAR_NAME), ("voxnet", VOXNET_NAME)):
-            row = stored.get(key)
-            if isinstance(row, dict) and "iou" in row:
-                scores.append({"pipeline": pipeline, "iou": row.get("iou"), "miou": row.get("miou")})
+        row = stored.get("voxnet")
+        if isinstance(row, dict) and "iou" in row:
+            scores.append({"pipeline": VOXNET_NAME, "iou": row.get("iou"), "miou": row.get("miou")})
     from ipm_baseline import predict_centers as ipm_centers
     from stereo_baseline import predict_centers as stereo_centers
 
