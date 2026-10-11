@@ -94,6 +94,7 @@ export interface BenchmarkTable {
   rows: BenchmarkRow[];
   heldout?: {
     frames: number;
+    label?: string;
     monocular_threshold?: number;
     monocular?: BenchmarkScore;
     voxnet?: BenchmarkScore;

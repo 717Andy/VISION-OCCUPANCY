@@ -6,7 +6,7 @@ import { PlaybackBar } from './PlaybackBar';
 import { TopBar } from './TopBar';
 import { InspectionPanel } from './InspectionPanel';
 import { CornerDock } from './CornerDock';
-import { fetchGpuLabel, fetchManifest, fetchModels, fetchRun, fetchRuns, wsUrl } from './api';
+import { fetchGpuLabel, fetchManifest, fetchModels, fetchRun, fetchRuns, fetchScenes, wsUrl } from './api';
 import type {
   BenchmarkTable as BenchmarkTableData,
   ControlsState,
@@ -108,6 +108,10 @@ export const App: React.FC = () => {
   const [latencyMs, setLatencyMs] = useState(0);
   const [gpu, setGpu] = useState('CPU');
   const [manifest, setManifest] = useState<SceneManifest | null>(null);
+  const [scenes, setScenes] = useState<{ name: string; label: string }[]>([
+    { name: 'scene-0103', label: 'scene-0103' },
+  ]);
+  const [scene, setScene] = useState('scene-0103');
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('single');
@@ -157,6 +161,7 @@ export const App: React.FC = () => {
   const thresholdRef = useRef(controls.threshold);
   const voxelSizeRef = useRef(controls.voxelSize);
   const frameIndexRef = useRef(frameIndex);
+  const sceneRef = useRef(scene);
   const modelRef = useRef(scoringModel);
   const compareModelRef = useRef<string | null>(null);
   const compareCountRef = useRef(0);
@@ -169,9 +174,11 @@ export const App: React.FC = () => {
   const compareFpRef = useRef<VoxelData[]>([]);
   const compareFnRef = useRef<VoxelData[]>([]);
   const emptyVoxelsRef = useRef<VoxelData[]>([]);
+  const ignoreBinaryRef = useRef(false);
   thresholdRef.current = controls.threshold;
   voxelSizeRef.current = controls.voxelSize;
   frameIndexRef.current = frameIndex;
+  sceneRef.current = scene;
   modelRef.current = scoringModel;
 
   const sendOccupancyConfig = useCallback((socket?: WebSocket | null) => {
@@ -186,22 +193,50 @@ export const App: React.FC = () => {
         threshold: thresholdRef.current,
         model: modelRef.current,
         compare_model: compareModelRef.current,
+        scene: sceneRef.current,
         paused: false,
       }),
     );
   }, []);
 
   useEffect(() => {
-    fetchManifest()
-      .then((data) => {
-        setManifest(data);
-        setFrameIndex(0);
-      })
-      .catch((err) => console.warn('nuScenes manifest unavailable', err));
+    fetchScenes().then((rows) => {
+      const next = rows
+        .filter((row) => row.name)
+        .map((row) => ({
+          name: row.name,
+          label: row.location ? `${row.name} · ${row.location}` : row.name,
+        }));
+      if (next.length > 0) setScenes(next);
+    });
     fetchGpuLabel().then(setGpu);
     fetchRuns().then(setRuns);
     fetchModels().then((names) => {
       if (names.length > 0) setModelNames(names);
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchManifest(scene)
+      .then((data) => {
+        if (!cancelled) setManifest(data);
+      })
+      .catch((err) => console.warn('nuScenes manifest unavailable', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [scene]);
+
+  const handleSceneChange = useCallback((next: string) => {
+    setScene((current) => {
+      if (current === next) return current;
+      setFrameIndex(0);
+      setPlaying(false);
+      setSelected(null);
+      setBenchmark(null);
+      setMiou('—');
+      return next;
     });
   }, []);
 
@@ -312,6 +347,7 @@ export const App: React.FC = () => {
         try {
           const msg = JSON.parse(event.data) as {
             type?: string;
+            scene?: string;
             elapsed_ms?: number;
             depth_ms?: number;
             project_ms?: number;
@@ -334,6 +370,11 @@ export const App: React.FC = () => {
             compare_fn_count?: number;
           };
           if (msg.type === 'occupancy_meta') {
+            if (msg.scene && msg.scene !== sceneRef.current) {
+              ignoreBinaryRef.current = true;
+              return;
+            }
+            ignoreBinaryRef.current = false;
             compareCountRef.current = typeof msg.compare_count === 'number' ? msg.compare_count : 0;
             protocolFpCountRef.current = typeof msg.protocol_fp_count === 'number' ? msg.protocol_fp_count : 0;
             protocolFnCountRef.current = typeof msg.protocol_fn_count === 'number' ? msg.protocol_fn_count : 0;
@@ -365,6 +406,10 @@ export const App: React.FC = () => {
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return;
+      if (ignoreBinaryRef.current) {
+        ignoreBinaryRef.current = false;
+        return;
+      }
       pendingFrameRef.current = {
         buffer: event.data,
         compareCount: compareCountRef.current,
@@ -416,7 +461,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     sendOccupancyConfig();
-  }, [frameIndex, controls.voxelSize, controls.threshold, sendOccupancyConfig]);
+  }, [frameIndex, scene, controls.voxelSize, controls.threshold, sendOccupancyConfig]);
 
   useEffect(() => {
     if (!playing || !manifest) return;
@@ -523,12 +568,16 @@ export const App: React.FC = () => {
         gpu={gpu}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        scenes={scenes}
+        scene={scene}
+        onSceneChange={handleSceneChange}
       />
 
       <div className={`workspace${viewMode === 'split' ? ' split' : ''}`}>
         <CameraFeed
           manifest={manifest}
           frameIndex={frameIndex}
+          scene={scene}
           settingsOpen={settingsOpen}
           onToggleSettings={() => {
             setSettingsOpen((open) => !open);

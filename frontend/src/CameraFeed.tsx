@@ -15,6 +15,7 @@ const LAYOUT: { id: string; className: string; fallback: string }[] = [
 interface CameraFeedProps {
   manifest: SceneManifest | null;
   frameIndex: number;
+  scene?: string;
   settingsOpen: boolean;
   onToggleSettings: () => void;
   highlightCamera?: string | null;
@@ -36,6 +37,7 @@ function formatCamOffset(sampleTs: number, camTs: number): string {
 export const CameraFeed: React.FC<CameraFeedProps> = ({
   manifest,
   frameIndex,
+  scene,
   settingsOpen,
   onToggleSettings,
   highlightCamera,
@@ -110,7 +112,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               >
                 {path ? (
                   <img
-                    src={cameraFrameUrl(frameIndex, cam.id)}
+                    src={cameraFrameUrl(frameIndex, cam.id, scene)}
                     alt={`${cam.fallback} at ${formatSceneTime(timeS)}`}
                     draggable={false}
                   />
@@ -136,7 +138,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             >
               {frame?.cameras[expandedCam.id] ? (
                 <img
-                  src={cameraFrameUrl(frameIndex, expandedCam.id)}
+                  src={cameraFrameUrl(frameIndex, expandedCam.id, scene)}
                   alt={`${expandedCam.fallback} enlarged`}
                   draggable={false}
                 />

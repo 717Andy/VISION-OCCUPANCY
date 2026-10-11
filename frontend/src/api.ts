@@ -7,16 +7,32 @@ export function wsUrl(path: string): string {
   return `${proto}://${window.location.host}${path}`;
 }
 
-export async function fetchManifest(): Promise<SceneManifest | null> {
-  const res = await fetch(`${API_BASE}/scene`);
+export async function fetchScenes(): Promise<{
+  name: string;
+  description?: string;
+  location?: string;
+  training_scene?: boolean;
+}[]> {
+  const res = await fetch(`${API_BASE}/scenes`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.scenes ?? [];
+}
+
+export async function fetchManifest(scene?: string): Promise<SceneManifest | null> {
+  const qs = scene ? `?scene=${encodeURIComponent(scene)}` : '';
+  const res = await fetch(`${API_BASE}/scene${qs}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to load scene manifest (${res.status})`);
   return res.json();
 }
 
-export function cameraFrameUrl(frameIndex: number, cameraId: string, cacheBust?: number): string {
-  const qs = cacheBust != null ? `?t=${cacheBust}` : '';
-  return `${API_BASE}/frames/${frameIndex}/cameras/${encodeURIComponent(cameraId)}${qs}`;
+export function cameraFrameUrl(frameIndex: number, cameraId: string, scene?: string, cacheBust?: number): string {
+  const params = new URLSearchParams();
+  if (scene) params.set('scene', scene);
+  if (cacheBust != null) params.set('t', String(cacheBust));
+  const qs = params.toString();
+  return `${API_BASE}/frames/${frameIndex}/cameras/${encodeURIComponent(cameraId)}${qs ? `?${qs}` : ''}`;
 }
 
 export async function fetchRuns(): Promise<SavedRunSummary[]> {

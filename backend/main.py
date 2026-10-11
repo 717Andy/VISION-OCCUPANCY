@@ -16,8 +16,10 @@ from nuscenes_loader import (
     ORIGINAL_IMAGE_SIZE,
     PREPARED_IMAGE_SIZE,
     ClipNotPrepared,
+    list_scenes,
     load_manifest,
     resolve_frame_path,
+    scene_context,
 )
 from pipeline import PerceptionPipeline
 
@@ -70,23 +72,30 @@ def gpu_label() -> str:
     return "CPU"
 
 
+@app.get("/api/scenes")
+def get_scenes():
+    return {"scenes": list_scenes()}
+
+
 @app.get("/api/scene")
-def get_scene():
+def get_scene(scene: str | None = None):
     try:
-        manifest = load_manifest()
-        manifest["original_image_size"] = list(ORIGINAL_IMAGE_SIZE)
-        manifest["prepared_image_size"] = list(PREPARED_IMAGE_SIZE)
-        return manifest
+        with scene_context(scene):
+            manifest = load_manifest()
+            manifest["original_image_size"] = list(ORIGINAL_IMAGE_SIZE)
+            manifest["prepared_image_size"] = list(PREPARED_IMAGE_SIZE)
+            return manifest
     except ClipNotPrepared as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/frames/{frame_index}/cameras/{camera_id}")
-def get_camera_frame(frame_index: int, camera_id: str):
+def get_camera_frame(frame_index: int, camera_id: str, scene: str | None = None):
     if camera_id not in CAMERA_IDS:
         raise HTTPException(status_code=404, detail="Unknown camera")
     try:
-        path = resolve_frame_path(frame_index, camera_id)
+        with scene_context(scene):
+            path = resolve_frame_path(frame_index, camera_id)
     except ClipNotPrepared as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (IndexError, KeyError, FileNotFoundError) as exc:
@@ -202,11 +211,12 @@ async def occupancy_websocket(websocket: WebSocket):
     frame_index = 0
     model = "Monocular depth"
     compare_model = ""
+    scene = "scene-0103"
     is_paused = False
     dirty = True
 
     async def receive_controls():
-        nonlocal threshold, voxel_size, frame_index, model, compare_model, is_paused, dirty
+        nonlocal threshold, voxel_size, frame_index, model, compare_model, scene, is_paused, dirty
         try:
             while True:
                 message = await websocket.receive_text()
@@ -226,6 +236,9 @@ async def occupancy_websocket(websocket: WebSocket):
                 if "compare_model" in data:
                     compare_model = str(data.get("compare_model") or "")
                     dirty = True
+                if data.get("scene"):
+                    scene = str(data["scene"])
+                    dirty = True
                 if "paused" in data:
                     is_paused = bool(data["paused"])
         except Exception:
@@ -241,10 +254,15 @@ async def occupancy_websocket(websocket: WebSocket):
                 th = threshold
                 selected = model
                 compare = compare_model
+                active_scene = scene
                 dirty = False
                 start_time = time.perf_counter()
 
                 def build_frame():
+                    with scene_context(active_scene):
+                        return _build_scene_frame(idx, vs, th, selected, compare)
+
+                def _build_scene_frame(idx, vs, th, selected, compare):
                     from benchmark import pack_protocol_errors
 
                     payload = pipeline.occupancy_for_frame(idx, vs, th, selected)
@@ -272,6 +290,7 @@ async def occupancy_websocket(websocket: WebSocket):
                     json.dumps(
                         {
                             "type": "occupancy_meta",
+                            "scene": active_scene,
                             "frame_index": idx,
                             "voxel_source": pipeline.voxel_source,
                             "depth_ms": pipeline.last_depth_ms,

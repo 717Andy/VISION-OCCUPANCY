@@ -234,7 +234,15 @@ class PerceptionPipeline:
         model: str = "Monocular depth",
     ) -> bytes:
         """Build occupancy for a synchronized 6-camera nuScenes timestep."""
-        key = (int(frame_index), round(float(voxel_size), 3), round(float(threshold), 3), str(model))
+        from nuscenes_loader import get_scene
+
+        key = (
+            get_scene(),
+            int(frame_index),
+            round(float(voxel_size), 3),
+            round(float(threshold), 3),
+            str(model),
+        )
         with self._cache_lock:
             cached = self._occupancy_cache.get(key)
             if cached is not None:
@@ -320,7 +328,9 @@ class PerceptionPipeline:
 
     def _refresh_benchmark(self, frame_index: int, threshold: float) -> None:
         """Attach the 1.0 m monocular-vs-VoxNet table without changing HUD mIoU."""
-        key = (int(frame_index), round(float(threshold), 3))
+        from nuscenes_loader import get_scene
+
+        key = (get_scene(), int(frame_index), round(float(threshold), 3))
         with self._cache_lock:
             cached = self._benchmark_cache.get(key)
             if cached is not None:

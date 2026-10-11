@@ -53,8 +53,29 @@ html, body, #root {
   color: var(--accent);
   letter-spacing: 0.2px;
   flex: 0 0 auto;
-  min-width: 240px;
+  min-width: 220px;
   text-align: center;
+}
+
+.scene-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  font-size: 16px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.scene-picker select {
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  max-width: 280px;
 }
 
 .mode-toggle {
@@ -865,6 +886,6 @@ html, body, #root {
 
 @media (max-width: 1100px) {
   .brand { font-size: 22px; min-width: 180px; }
-  .mode-toggle, .hud { font-size: 14px; }
+  .mode-toggle, .hud, .scene-picker { font-size: 14px; }
   .chrome-bar, .playback-bar { height: 60px; }
 }
