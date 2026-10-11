@@ -1,4 +1,4 @@
-import type { SavedRun, SavedRunSummary, SceneManifest } from './types';
+import type { CrossSceneProtocol, SavedRun, SavedRunSummary, SceneManifest } from './types';
 
 export const API_BASE = '/api';
 
@@ -33,6 +33,12 @@ export function cameraFrameUrl(frameIndex: number, cameraId: string, scene?: str
   if (cacheBust != null) params.set('t', String(cacheBust));
   const qs = params.toString();
   return `${API_BASE}/frames/${frameIndex}/cameras/${encodeURIComponent(cameraId)}${qs ? `?${qs}` : ''}`;
+}
+
+export async function fetchCrossScene(): Promise<CrossSceneProtocol | null> {
+  const res = await fetch(`${API_BASE}/protocol/scenes`);
+  if (!res.ok) return null;
+  return res.json();
 }
 
 export async function fetchRuns(): Promise<SavedRunSummary[]> {

@@ -109,6 +109,14 @@ def _checkpoint_id() -> str:
     return checkpoint_id()
 
 
+@app.get("/api/protocol/scenes")
+def protocol_scenes():
+    """1.0 m IoU for every prepared clip, from the saved protocol summaries."""
+    from benchmark import cross_scene_protocol
+
+    return cross_scene_protocol()
+
+
 @app.get("/api/models")
 def list_models():
     """Predictors the workbench can draw and score."""

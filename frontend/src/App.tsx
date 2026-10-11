@@ -620,6 +620,7 @@ export const App: React.FC = () => {
           distanceZones={distanceZones}
           miouDrop={miouDrop}
           viewingModel={scoringModel}
+          scene={scene}
         />
       </div>
 

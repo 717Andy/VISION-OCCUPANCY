@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
-import type { BenchmarkTable as BenchmarkTableData, SavedRun, SavedRunSummary } from './types';
+import React, { useEffect, useState } from 'react';
+import { fetchCrossScene } from './api';
+import type {
+  BenchmarkTable as BenchmarkTableData,
+  CrossSceneProtocol,
+  SavedRun,
+  SavedRunSummary,
+} from './types';
 
 function formatCount(value: number): string {
   return Math.round(value).toLocaleString('en-US');
@@ -50,9 +56,15 @@ export const BenchmarkTable: React.FC<{
   selectedRun?: SavedRun | null;
   onSelectRun?: (id: string) => void;
   viewingModel?: string;
-}> = ({ table, runs = [], selectedRun = null, onSelectRun, viewingModel }) => {
+  scene?: string;
+}> = ({ table, runs = [], selectedRun = null, onSelectRun, viewingModel, scene }) => {
   const [chosen, setChosen] = useState<string[]>(DEFAULT_COMPARE);
   const [reference, setReference] = useState('Lift-Splat');
+  const [crossScene, setCrossScene] = useState<CrossSceneProtocol | null>(null);
+
+  useEffect(() => {
+    fetchCrossScene().then(setCrossScene).catch(() => setCrossScene(null));
+  }, []);
   const names = table?.rows.map((row) => row.pipeline) ?? [];
   const active = chosen.filter((name) => names.includes(name));
   const compared = active.length >= 2 ? active : names.slice(0, Math.min(2, names.length));
@@ -122,6 +134,57 @@ export const BenchmarkTable: React.FC<{
           </div>
         ))}
       </div>
+      {crossScene && crossScene.scenes.length > 0 && (
+        <section className="cross-scene" aria-label="Protocol IoU across clips">
+          <h3>Across clips</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Pipeline</th>
+                {crossScene.scenes.map((column) => (
+                  <th key={column.name} className={column.name === scene ? 'current' : undefined} scope="col">
+                    <span className="cross-heading">{column.heading}</span>
+                    <span className="cross-detail">{column.detail}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {compared.map((name) => {
+                const values = crossScene.scenes.map((column) => {
+                  const score = column.scores.find((row) => row.pipeline === name && !row.error);
+                  return typeof score?.iou === 'number' ? score.iou : null;
+                });
+                const finite = values.filter((value): value is number => value !== null);
+                const best = finite.length > 0 ? Math.max(...finite) : null;
+                return (
+                  <tr key={name} className={name === viewingModel ? 'viewing' : undefined}>
+                    <th scope="row">
+                      {name}
+                      {name === viewingModel && <span className="viewing-badge">viewing</span>}
+                    </th>
+                    {crossScene.scenes.map((column, index) => {
+                      const value = values[index];
+                      const isBest = value !== null && best !== null && value === best;
+                      return (
+                        <td
+                          key={column.name}
+                          className={[column.name === scene ? 'current' : '', isBest ? 'best' : ''].filter(Boolean).join(' ') || undefined}
+                        >
+                          {value === null ? '—' : formatScore(value)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="bench-note">
+            IoU on the {(crossScene.voxel_m ?? 1).toFixed(1)} m protocol. {crossScene.scenes.find((column) => column.training_scene)?.heading ?? '0103'} uses its held-out frames. The other clips use every frame.
+          </p>
+        </section>
+      )}
       <table>
         <thead>
           <tr>

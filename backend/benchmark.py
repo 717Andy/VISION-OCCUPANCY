@@ -362,6 +362,41 @@ def comparison_heldout() -> dict[str, Any]:
     return summary
 
 
+def cross_scene_protocol() -> dict[str, Any]:
+    """1.0 m scores for every prepared clip. Reads the saved summaries."""
+    from nuscenes_loader import list_scenes, scene_root
+
+    scenes: list[dict[str, Any]] = []
+    for row in list_scenes():
+        path = scene_root(row["name"]) / "protocol_summary.json"
+        if not path.is_file():
+            continue
+        summary = json.loads(path.read_text())
+        description = str(row.get("description") or "")
+        night = description.strip().lower().startswith("night")
+        label = str(summary.get("label") or "")
+        if label == "Held-out":
+            detail = "held-out"
+        elif night:
+            detail = "night"
+        else:
+            detail = "unseen"
+        place = str(row.get("location") or "").replace("singapore-", "")
+        scenes.append(
+            {
+                "name": row["name"],
+                "heading": str(row["name"]).replace("scene-", ""),
+                "detail": detail,
+                "place": place,
+                "label": label,
+                "frames": summary.get("frames"),
+                "training_scene": bool(row.get("training_scene")),
+                "scores": summary.get("scores") or [],
+            }
+        )
+    return {"voxel_m": float(BENCH_VOXEL_M), "scenes": scenes}
+
+
 def _score_every_predictor(frame_ids: list[int]) -> list[dict[str, Any]]:
     """Score each registered model. Used for scenes none of them were trained on."""
     scores: list[dict[str, Any]] = []

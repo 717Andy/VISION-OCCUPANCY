@@ -27,6 +27,27 @@ class SceneRootTests(unittest.TestCase):
         self.assertEqual(scene_root("scene-0103"), DATA_ROOT)
         self.assertEqual(scene_root("scene-0061"), DATA_ROOT / "scenes" / "scene-0061")
 
+    def test_cross_scene_protocol_keeps_held_out_separate_from_unseen(self):
+        from benchmark import cross_scene_protocol
+
+        doc = cross_scene_protocol()
+        self.assertEqual(doc["voxel_m"], 1.0)
+        by_name = {row["name"]: row for row in doc["scenes"]}
+        self.assertEqual(
+            list(by_name),
+            ["scene-0103", "scene-0061", "scene-0796", "scene-1094"],
+        )
+        self.assertEqual(by_name["scene-0103"]["label"], "Held-out")
+        self.assertEqual(by_name["scene-0103"]["detail"], "held-out")
+        self.assertEqual(by_name["scene-0103"]["frames"], 8)
+        self.assertEqual(by_name["scene-1094"]["detail"], "night")
+        self.assertEqual(by_name["scene-0061"]["label"], "Unseen")
+        self.assertGreater(by_name["scene-0061"]["frames"], 8)
+        for row in doc["scenes"]:
+            camera = next(score for score in row["scores"] if score["pipeline"] == "Camera-space")
+            self.assertGreater(camera["iou"], 0.0)
+            self.assertNotIn("error", camera)
+
     def test_listed_scenes_mark_only_the_training_clip(self):
         names = {row["name"]: row for row in list_scenes()}
         self.assertEqual(
