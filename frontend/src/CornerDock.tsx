@@ -12,13 +12,18 @@ function formatDrop(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(3) : '—';
 }
 
+function knownCells(zone: DistanceZone): number | null {
+  if (typeof zone.tp !== 'number' || typeof zone.fp !== 'number' || typeof zone.fn !== 'number') return null;
+  return zone.tp + zone.fp + zone.fn;
+}
+
 function DistanceErrorChart({ zones }: { zones: DistanceZone[] }) {
   const width = 400;
-  const height = 90;
-  const left = 32;
+  const height = 128;
+  const left = 46;
   const right = 10;
-  const top = 14;
-  const bottom = 28;
+  const top = 16;
+  const bottom = 48;
   const innerWidth = width - left - right;
   const innerHeight = height - top - bottom;
   const points = zones.map((zone, index) => {
@@ -42,6 +47,15 @@ function DistanceErrorChart({ zones }: { zones: DistanceZone[] }) {
       role="img"
       aria-label={`Distance error by range: ${label}`}
     >
+      <text
+        x={14}
+        y={top + innerHeight / 2}
+        textAnchor="middle"
+        transform={`rotate(-90 14 ${top + innerHeight / 2})`}
+        className="range-axis"
+      >
+        error
+      </text>
       {[0, 0.5, 1].map((tick) => {
         const y = top + (1 - tick) * innerHeight;
         return (
@@ -82,13 +96,17 @@ function DistanceErrorChart({ zones }: { zones: DistanceZone[] }) {
         const labelX = index === 0 ? left : index === zones.length - 1 ? width - right : x;
         const miou =
           typeof zone.miou === 'number' && Number.isFinite(zone.miou) ? zone.miou.toFixed(3) : '—';
+        const cells = knownCells(zone);
         return (
           <g key={zone.zone}>
-            <text x={labelX} y={height - 14} textAnchor={anchor} className="range-label">
+            <text x={labelX} y={height - 34} textAnchor={anchor} className="range-label">
               {zone.label}
             </text>
-            <text x={labelX} y={height - 2} textAnchor={anchor} className="range-sublabel">
+            <text x={labelX} y={height - 22} textAnchor={anchor} className="range-sublabel">
               mIoU {miou}
+            </text>
+            <text x={labelX} y={height - 10} textAnchor={anchor} className="range-sublabel">
+              {cells === null ? '—' : `${cells.toLocaleString('en-US')} cells`}
             </text>
           </g>
         );
@@ -131,7 +149,22 @@ export const CornerDock: React.FC<{
   miouDrop: MiouDrop;
   viewingModel: string;
   scene?: string;
-}> = ({ table, runs, selectedRun, onSelectRun, distanceZones, miouDrop, viewingModel, scene }) => {
+  frameIndex: number;
+  gridM: number;
+  tolerance: number;
+}> = ({
+  table,
+  runs,
+  selectedRun,
+  onSelectRun,
+  distanceZones,
+  miouDrop,
+  viewingModel,
+  scene,
+  frameIndex,
+  gridM,
+  tolerance,
+}) => {
   const [benchmarkOpen, setBenchmarkOpen] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
 
@@ -156,6 +189,9 @@ export const CornerDock: React.FC<{
                 <p className="bench-note">Distance error is not ready yet.</p>
               ) : (
                 <>
+                  <p className="bench-note">
+                    {viewingModel} · {gridM.toFixed(1)} m · tol {tolerance} · frame {frameIndex}
+                  </p>
                   <p className="bench-note">Error = 1 − height-band mIoU. Higher on the chart is a larger miss.</p>
                   <div className="range-plot">
                     <DistanceErrorChart zones={distanceZones} />
@@ -164,6 +200,9 @@ export const CornerDock: React.FC<{
                     mIoU drop {formatDrop(miouDrop.near_to_mid)} from 0–10 m to 10–25 m,{' '}
                     {formatDrop(miouDrop.mid_to_far)} from 10–25 m to 25 m+,{' '}
                     {formatDrop(miouDrop.near_to_far)} from 0–10 m to 25 m+.
+                  </p>
+                  <p className="bench-note">
+                    The max-range slider does not change this chart. A negative drop means the farther band scored better.
                   </p>
                 </>
               )}

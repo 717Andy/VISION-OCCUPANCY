@@ -118,6 +118,8 @@ export const App: React.FC = () => {
   const [miou, setMiou] = useState('—');
   const [distanceZones, setDistanceZones] = useState<DistanceZone[]>([]);
   const [miouDrop, setMiouDrop] = useState<MiouDrop>({});
+  const [liveGrid, setLiveGrid] = useState(0.2);
+  const [liveTolerance, setLiveTolerance] = useState(1);
   const [discrepancyOn, setDiscrepancyOn] = useState(false);
   const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
   const [benchmark, setBenchmark] = useState<BenchmarkTableData | null>(null);
@@ -393,6 +395,8 @@ export const App: React.FC = () => {
               const grid = msg.metric.grid_m ?? 0.2;
               const tol = msg.metric.tolerance_cells ?? 1;
               setMiou(`${msg.metric.iou.toFixed(2)} (${grid} m, tol ${tol})`);
+              setLiveGrid(grid);
+              setLiveTolerance(tol);
               setDistanceZones(Array.isArray(msg.metric.distance_zones) ? msg.metric.distance_zones : []);
               setMiouDrop(msg.metric.miou_drop ?? {});
             } else if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
@@ -621,6 +625,9 @@ export const App: React.FC = () => {
           miouDrop={miouDrop}
           viewingModel={scoringModel}
           scene={scene}
+          frameIndex={frameIndex}
+          gridM={liveGrid}
+          tolerance={liveTolerance}
         />
       </div>
 

@@ -173,12 +173,14 @@ html, body, #root {
 
 .range-label,
 .range-value,
-.range-sublabel {
+.range-sublabel,
+.range-axis {
   fill: rgba(255, 255, 255, 0.82);
   font-family: var(--font-ui);
 }
 
-.range-label {
+.range-label,
+.range-axis {
   font-size: 11px;
 }
 
