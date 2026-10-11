@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tarfile
 import urllib.request
 from pathlib import Path
@@ -11,7 +12,13 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from lidar_gt import lidar_sensor_to_ego, read_nuscenes_lidar_bin, save_lidar_ego_points
+from lidar_gt import (
+    SWEEP_WINDOW_US,
+    read_nuscenes_lidar_bin,
+    rows_in_window,
+    save_lidar_ego_points,
+    sweep_points_in_keyframe_ego,
+)
 
 ROOT = Path(__file__).resolve().parent
 DATA_ROOT = ROOT / "data" / "nuscenes"
@@ -68,8 +75,12 @@ def archive_index(tar: tarfile.TarFile) -> tuple[list[tarfile.TarInfo], dict[str
         name = member.name.lstrip("./")
         if name.endswith(".json") and "v1.0-mini/" in name:
             json_members.append(member)
-        elif (name.endswith(".jpg") or name.endswith(".pcd.bin")) and "samples/" in name:
+        elif name.endswith(".jpg") and "samples/" in name:
             rel = name[name.find("samples/") :]
+            samples_index[rel] = member
+        elif name.endswith(".pcd.bin") and ("samples/" in name or "sweeps/" in name):
+            key = "samples/" if "samples/" in name else "sweeps/"
+            rel = name[name.find(key) :]
             samples_index[rel] = member
     return json_members, samples_index
 
@@ -90,6 +101,7 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
     calibrated = index_by_token(load_table(meta_dir, "calibrated_sensor"))
     sensors = index_by_token(load_table(meta_dir, "sensor"))
     logs = index_by_token(load_table(meta_dir, "log"))
+    ego_poses = index_by_token(load_table(meta_dir, "ego_pose"))
 
     scene = choose_scene(scenes)
     scene_samples = collect_samples(samples, scene["token"])
@@ -174,6 +186,8 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
         sensors,
         samples_index,
         frames,
+        ego_poses,
+        scene["token"],
     )
 
     duration_s = frames[-1].get("time_s", 0.0) if frames else 0.0
@@ -188,6 +202,7 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
         "sample_hz": round(sample_hz, 3),
         "frame_count": len(frames),
         "ground_truth": "LIDAR_TOP",
+        "lidar_window_us": SWEEP_WINDOW_US,
         "cameras": [
             {"id": cam, "label": cam.replace("CAM_", "").replace("_", " ").title()}
             for cam in CAMERA_IDS
@@ -200,6 +215,35 @@ def extract_clip(tar: tarfile.TarFile) -> dict:
     return manifest
 
 
+def archive_rel(filename: str) -> str:
+    filename = filename.replace("\\", "/")
+    for key in ("samples/", "sweeps/"):
+        if key in filename:
+            return filename[filename.find(key) :]
+    return filename
+
+
+def scene_lidar_rows(
+    sample_data_rows: list[dict],
+    scene_tokens: set[str],
+    calibrated: dict[str, dict],
+    sensors: dict[str, dict],
+) -> list[dict]:
+    """LIDAR_TOP rows for this scene, keyframes and the sweeps between them."""
+    rows: list[dict] = []
+    for row in sample_data_rows:
+        if row.get("fileformat") != "pcd" or row["sample_token"] not in scene_tokens:
+            continue
+        calib = calibrated.get(row["calibrated_sensor_token"])
+        if not calib:
+            continue
+        sensor = sensors.get(calib["sensor_token"])
+        if not sensor or sensor.get("channel") != LIDAR_CHANNEL:
+            continue
+        rows.append(row)
+    return rows
+
+
 def extract_scene_lidar(
     tar: tarfile.TarFile,
     scene_samples: list[dict],
@@ -208,34 +252,34 @@ def extract_scene_lidar(
     sensors: dict[str, dict],
     samples_index: dict[str, tarfile.TarInfo],
     frames: list[dict],
+    ego_poses: dict[str, dict],
+    scene_token: str,
 ) -> None:
-    """Save each keyframe's LIDAR_TOP sweep in the ego frame."""
-    by_sample: dict[str, dict] = {}
-    for row in sample_data_rows:
-        if not row.get("is_key_frame") or row.get("fileformat") != "pcd":
-            continue
-        calib = calibrated.get(row["calibrated_sensor_token"])
-        if not calib:
-            continue
-        sensor = sensors.get(calib["sensor_token"])
-        if not sensor or sensor.get("channel") != LIDAR_CHANNEL:
-            continue
-        by_sample[row["sample_token"]] = row
+    """Stack a short lidar window into each keyframe ego frame."""
+    scene_tokens = {sample["token"] for sample in scene_samples}
+    lidar_rows = scene_lidar_rows(sample_data_rows, scene_tokens, calibrated, sensors)
+    del scene_token
+    key_by_sample = {row["sample_token"]: row for row in lidar_rows if row.get("is_key_frame")}
 
+    planned: list[tuple[int, dict, list[dict]]] = []
     needed: list[tarfile.TarInfo] = []
-    planned: list[tuple[int, dict, tarfile.TarInfo]] = []
     for index, sample in enumerate(scene_samples):
-        row = by_sample.get(sample["token"])
-        if not row:
+        key = key_by_sample.get(sample["token"])
+        if not key:
             continue
-        filename = row["filename"].replace("\\", "/")
-        rel = filename[filename.find("samples/") :] if "samples/" in filename else filename
-        member = samples_index.get(rel)
-        if member is None:
-            print(f"Missing lidar archive member for {filename}")
-            continue
-        needed.append(member)
-        planned.append((index, row, member))
+        window = rows_in_window(lidar_rows, int(key["timestamp"]), SWEEP_WINDOW_US)
+        if key not in window:
+            window.append(key)
+        members: list[tuple[dict, tarfile.TarInfo]] = []
+        for row in window:
+            member = samples_index.get(archive_rel(row["filename"]))
+            if member is None:
+                print(f"Missing lidar archive member for {row['filename']}")
+                continue
+            members.append((row, member))
+            needed.append(member)
+        if members:
+            planned.append((index, key, [row for row, _member in members]))
 
     if not planned:
         print("No LIDAR_TOP keyframes found for this scene")
@@ -246,31 +290,83 @@ def extract_scene_lidar(
     print(f"Extracting {len(unique_needed)} LIDAR_TOP sweeps...")
     tar.extractall(EXTRACT_ROOT, members=unique_needed, filter="data")
 
-    for index, row, member in planned:
-        src = EXTRACT_ROOT / member.name.lstrip("./")
-        if not src.exists():
-            matches = list(EXTRACT_ROOT.rglob(Path(member.name).name))
-            src = matches[0] if matches else src
-        if not src.exists():
-            print(f"Extracted lidar missing: {member.name}")
+    resolved = {archive_rel(row["filename"]): row for row in lidar_rows}
+    for index, key, window in planned:
+        key_pose = ego_poses[key["ego_pose_token"]]
+        clouds: list[np.ndarray] = []
+        for row in window:
+            member = samples_index.get(archive_rel(row["filename"]))
+            if member is None:
+                continue
+            src = EXTRACT_ROOT / member.name.lstrip("./")
+            if not src.exists():
+                matches = list(EXTRACT_ROOT.rglob(Path(member.name).name))
+                src = matches[0] if matches else src
+            if not src.exists():
+                print(f"Extracted lidar missing: {member.name}")
+                continue
+            calib = calibrated[row["calibrated_sensor_token"]]
+            pose = ego_poses[row["ego_pose_token"]]
+            sensor_pts = read_nuscenes_lidar_bin(src)
+            clouds.append(
+                sweep_points_in_keyframe_ego(
+                    sensor_pts,
+                    np.asarray(calib["rotation"], dtype=np.float64),
+                    np.asarray(calib["translation"], dtype=np.float64),
+                    np.asarray(pose["rotation"], dtype=np.float64),
+                    np.asarray(pose["translation"], dtype=np.float64),
+                    np.asarray(key_pose["rotation"], dtype=np.float64),
+                    np.asarray(key_pose["translation"], dtype=np.float64),
+                )
+            )
+        if not clouds:
             continue
-        calib = calibrated[row["calibrated_sensor_token"]]
-        sensor_pts = read_nuscenes_lidar_bin(src)
-        ego_pts = lidar_sensor_to_ego(
-            sensor_pts,
-            np.asarray(calib["rotation"], dtype=np.float64),
-            np.asarray(calib["translation"], dtype=np.float64),
-        )
-        path = save_lidar_ego_points(index, ego_pts)
+        stacked = np.concatenate(clouds, axis=0)
+        path = save_lidar_ego_points(index, stacked)
         frames[index]["lidar"] = str(path.relative_to(DATA_ROOT))
-        print(f"  frame {index:04d}: {np.load(path).shape[0]} ego points")
+        frames[index]["lidar_sweeps"] = len(clouds)
+        print(f"  frame {index:04d}: {len(clouds)} sweeps -> {np.load(path).shape[0]} ego points")
+
+
+def refresh_lidar(tar: tarfile.TarFile) -> None:
+    """Replace stored lidar with a short ego-pose-aligned sweep window."""
+    if not MANIFEST_PATH.is_file():
+        raise FileNotFoundError(f"Missing manifest {MANIFEST_PATH}")
+    json_members, samples_index = archive_index(tar)
+    EXTRACT_ROOT.mkdir(parents=True, exist_ok=True)
+    tar.extractall(EXTRACT_ROOT, members=json_members, filter="data")
+    matches = list(EXTRACT_ROOT.rglob("scene.json"))
+    if not matches:
+        raise FileNotFoundError("Could not find v1.0-mini metadata in archive")
+    meta_dir = matches[0].parent
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    scene_token = manifest["scene_token"]
+    samples = load_table(meta_dir, "sample")
+    scene_samples = collect_samples(samples, scene_token)
+    extract_scene_lidar(
+        tar,
+        scene_samples,
+        load_table(meta_dir, "sample_data"),
+        index_by_token(load_table(meta_dir, "calibrated_sensor")),
+        index_by_token(load_table(meta_dir, "sensor")),
+        samples_index,
+        manifest["frames"],
+        index_by_token(load_table(meta_dir, "ego_pose")),
+        scene_token,
+    )
+    manifest["lidar_window_us"] = SWEEP_WINDOW_US
+    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
+    print(f"Updated lidar for {manifest['scene_name']} -> {MANIFEST_PATH}")
 
 
 def main() -> None:
     download_archive()
     print("Opening archive (this can take a minute)...")
     with tarfile.open(ARCHIVE_PATH, "r:*") as tar:
-        extract_clip(tar)
+        if "--lidar-only" in sys.argv:
+            refresh_lidar(tar)
+        else:
+            extract_clip(tar)
 
 
 if __name__ == "__main__":

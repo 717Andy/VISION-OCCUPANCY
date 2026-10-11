@@ -7,12 +7,14 @@ from pathlib import Path
 import numpy as np
 
 from nuscenes_loader import CAMERA_IDS, DATA_ROOT, load_synchronized_frame
-from projection import EGO_BOUNDS, camera_to_ego, camera_visible_points
+from projection import EGO_BOUNDS, camera_to_ego, camera_visible_points, quat_to_rotmat
 
 LIDAR_DIR = DATA_ROOT / "lidar"
 # Store one point per cell so the clip stays small and still finer than the UI voxels.
 STORE_VOXEL_M = 0.1
-MAX_STORED_POINTS = 30_000
+MAX_STORED_POINTS = 80_000
+# One 20 Hz sweep on each side of the keyframe. The span is about 0.15 s.
+SWEEP_WINDOW_US = 75_000
 
 
 def lidar_path(frame_index: int) -> Path:
@@ -68,6 +70,46 @@ def read_nuscenes_lidar_bin(path: Path) -> np.ndarray:
     else:
         raise ValueError(f"Unexpected lidar width in {path} ({raw.size} floats)")
     return raw.reshape(-1, cols)[:, :3].astype(np.float64, copy=False)
+
+
+def global_to_ego(
+    points_global: np.ndarray,
+    rotation_wxyz: np.ndarray,
+    translation: np.ndarray,
+) -> np.ndarray:
+    """Invert ego_pose: global points into that ego frame."""
+    pts = np.asarray(points_global, dtype=np.float64).reshape(-1, 3)
+    if pts.size == 0:
+        return np.zeros((0, 3), dtype=np.float64)
+    rot = quat_to_rotmat(rotation_wxyz)
+    trans = np.asarray(translation, dtype=np.float64).reshape(1, 3)
+    return (rot.T @ (pts - trans).T).T
+
+
+def sweep_points_in_keyframe_ego(
+    points_sensor: np.ndarray,
+    sensor_rotation: np.ndarray,
+    sensor_translation: np.ndarray,
+    sweep_ego_rotation: np.ndarray,
+    sweep_ego_translation: np.ndarray,
+    key_ego_rotation: np.ndarray,
+    key_ego_translation: np.ndarray,
+) -> np.ndarray:
+    """Lidar returns from one sweep, expressed in the keyframe ego frame.
+
+    Ego pose removes the car's motion. Points on a mover stay where they were
+    at that sweep's time.
+    """
+    ego = lidar_sensor_to_ego(points_sensor, sensor_rotation, sensor_translation)
+    world = camera_to_ego(ego, sweep_ego_rotation, sweep_ego_translation)
+    return global_to_ego(world, key_ego_rotation, key_ego_translation)
+
+
+def rows_in_window(rows: list[dict], timestamp: int, window_us: int = SWEEP_WINDOW_US) -> list[dict]:
+    """sample_data rows within `window_us` of a keyframe timestamp."""
+    center = int(timestamp)
+    limit = int(window_us)
+    return [row for row in rows if abs(int(row["timestamp"]) - center) <= limit]
 
 
 def lidar_sensor_to_ego(
