@@ -25,6 +25,15 @@ IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 DEPTH_CACHE_ROOT = Path(__file__).resolve().parent / "data" / "nuscenes" / "depth"
+_SHARED_ENGINE: MidasDepthEngine | None = None
+
+
+def shared_engine() -> "MidasDepthEngine":
+    """One MiDaS instance for the protocol scorer and the depth precompute."""
+    global _SHARED_ENGINE
+    if _SHARED_ENGINE is None:
+        _SHARED_ENGINE = MidasDepthEngine()
+    return _SHARED_ENGINE
 
 
 class MidasDepthEngine:
