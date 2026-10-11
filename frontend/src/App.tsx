@@ -568,9 +568,6 @@ export const App: React.FC = () => {
         gpu={gpu}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
-        scenes={scenes}
-        scene={scene}
-        onSceneChange={handleSceneChange}
       />
 
       <div className={`workspace${viewMode === 'split' ? ' split' : ''}`}>
@@ -578,6 +575,8 @@ export const App: React.FC = () => {
           manifest={manifest}
           frameIndex={frameIndex}
           scene={scene}
+          scenes={scenes}
+          onSceneChange={handleSceneChange}
           settingsOpen={settingsOpen}
           onToggleSettings={() => {
             setSettingsOpen((open) => !open);

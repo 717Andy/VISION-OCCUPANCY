@@ -16,6 +16,8 @@ interface CameraFeedProps {
   manifest: SceneManifest | null;
   frameIndex: number;
   scene?: string;
+  scenes: { name: string; label: string }[];
+  onSceneChange: (scene: string) => void;
   settingsOpen: boolean;
   onToggleSettings: () => void;
   highlightCamera?: string | null;
@@ -38,6 +40,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   manifest,
   frameIndex,
   scene,
+  scenes,
+  onSceneChange,
   settingsOpen,
   onToggleSettings,
   highlightCamera,
@@ -125,10 +129,20 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                     <span className="cam-ts">{formatCamOffset(frame.timestamp, camTs)}</span>
                   )}
                 </span>
-              </article>
-            );
+            </article>
+          );
           })}
         </div>
+        <label className="scene-picker">
+          Scene
+          <select aria-label="nuScenes scene" value={scene ?? ''} onChange={(event) => onSceneChange(event.target.value)}>
+            {scenes.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {expanded && expandedCam && (
           <div className="cam-popup-backdrop" onClick={() => setExpanded(null)}>
             <article

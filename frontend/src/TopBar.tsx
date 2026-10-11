@@ -9,9 +9,6 @@ interface TopBarProps {
   gpu: string;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
-  scenes: { name: string; label: string }[];
-  scene: string;
-  onSceneChange: (scene: string) => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -22,23 +19,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   gpu,
   viewMode,
   onViewModeChange,
-  scenes,
-  scene,
-  onSceneChange,
 }) => {
   return (
     <header className="chrome-bar">
       <div className="brand">VisionOccupancy</div>
-      <label className="scene-picker">
-        Scene
-        <select aria-label="nuScenes scene" value={scene} onChange={(event) => onSceneChange(event.target.value)}>
-          {scenes.map((item) => (
-            <option key={item.name} value={item.name}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-      </label>
       <div className="mode-toggle" role="radiogroup" aria-label="Viewport mode">
         <span>Mode: [</span>
         <button
