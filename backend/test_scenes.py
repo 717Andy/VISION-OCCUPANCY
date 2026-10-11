@@ -1,4 +1,4 @@
-"""A second clip stays off the training-scene paths and off the held-out label."""
+"""Extra clips stay off the training-scene paths and off the held-out label."""
 
 from __future__ import annotations
 
@@ -17,8 +17,12 @@ class SceneRootTests(unittest.TestCase):
 
     def test_listed_scenes_mark_only_the_training_clip(self):
         names = {row["name"]: row for row in list_scenes()}
-        self.assertIn("scene-0103", names)
-        self.assertTrue(names["scene-0103"]["training_scene"])
+        self.assertEqual(
+            set(names),
+            {"scene-0103", "scene-0061", "scene-0796", "scene-1094"},
+        )
+        training = [name for name, row in names.items() if row["training_scene"]]
+        self.assertEqual(training, ["scene-0103"])
 
     def test_unseen_scene_is_not_called_held_out(self):
         from benchmark import _HELDOUT_BY_SCENE, _frame_split, comparison_heldout
