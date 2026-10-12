@@ -50,6 +50,7 @@ class PerceptionPipeline:
         self._occupancy_cache: OrderedDict[tuple[int, float, float], tuple[bytes, float, dict[str, Any]]] = OrderedDict()
         self._benchmark_cache: OrderedDict[tuple[int, float], dict[str, Any]] = OrderedDict()
         self._cache_lock = threading.Lock()
+        self._benchmark_compute_lock = threading.Lock()
 
         x = np.arange(GRID_X, dtype=np.float32)
         y = np.arange(GRID_Y, dtype=np.float32)
@@ -256,7 +257,6 @@ class PerceptionPipeline:
             else:
                 payload = None
         if payload is not None:
-            self._refresh_benchmark(int(frame_index), float(threshold))
             return payload
 
         if model != "Monocular depth":
@@ -289,7 +289,6 @@ class PerceptionPipeline:
                     threshold=threshold, frame_index=frame_index, voxel_size=voxel_size
                 )
 
-        self._refresh_benchmark(int(frame_index), float(threshold))
         with self._cache_lock:
             self._occupancy_cache[key] = (payload, float(self.last_miou), dict(self.last_metric or {}))
             self._occupancy_cache.move_to_end(key)
@@ -325,6 +324,31 @@ class PerceptionPipeline:
                 self.last_benchmark,
                 self.last_frame_index,
             ) = snap
+
+    def cached_benchmark(self, frame_index: int, threshold: float) -> dict[str, Any] | None:
+        """Return a protocol table that was already scored. Does not compute one."""
+        from nuscenes_loader import get_scene
+
+        key = (get_scene(), int(frame_index), round(float(threshold), 3))
+        with self._cache_lock:
+            cached = self._benchmark_cache.get(key)
+            if cached is None:
+                return None
+            self._benchmark_cache.move_to_end(key)
+            self.last_benchmark = cached
+            return cached
+
+    def ensure_benchmark(self, frame_index: int, threshold: float) -> dict[str, Any] | None:
+        """Score the 1.0 m table for this frame. Safe to run after the voxels are sent."""
+        cached = self.cached_benchmark(frame_index, threshold)
+        if cached is not None:
+            return cached
+        with self._benchmark_compute_lock:
+            cached = self.cached_benchmark(frame_index, threshold)
+            if cached is not None:
+                return cached
+            self._refresh_benchmark(int(frame_index), float(threshold))
+            return self.last_benchmark
 
     def _refresh_benchmark(self, frame_index: int, threshold: float) -> None:
         """Attach the 1.0 m monocular-vs-VoxNet table without changing HUD mIoU."""
