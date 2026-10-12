@@ -99,6 +99,7 @@ const DEFAULT_CONTROLS: ControlsState = {
 
 const FALSE_POSITIVE_COLOR = '#ff5d73';
 const MISS_COLOR = '#e6d35a';
+const DRAW_CAP = 900;
 
 export const App: React.FC = () => {
   const [controls, setControls] = useState<ControlsState>(DEFAULT_CONTROLS);
@@ -120,6 +121,7 @@ export const App: React.FC = () => {
   const [miouDrop, setMiouDrop] = useState<MiouDrop>({});
   const [liveGrid, setLiveGrid] = useState(0.2);
   const [liveTolerance, setLiveTolerance] = useState(1);
+  const [drawSample, setDrawSample] = useState({ pred: false, gt: false, compare: false });
   const [discrepancyOn, setDiscrepancyOn] = useState(false);
   const [discrepancyColor, setDiscrepancyColor] = useState('#f0883e');
   const [benchmark, setBenchmark] = useState<BenchmarkTableData | null>(null);
@@ -269,7 +271,7 @@ export const App: React.FC = () => {
       sendOccupancyConfig(ws);
     };
 
-    const decodeVoxels = (floats: Float32Array, count: number, maxKeep = 900): VoxelData[] => {
+    const decodeVoxels = (floats: Float32Array, count: number, maxKeep = DRAW_CAP): VoxelData[] => {
       const stride = Math.max(1, Math.ceil(count / maxKeep));
       const kept = Math.ceil(count / stride);
       const voxelList: VoxelData[] = new Array(kept);
@@ -320,6 +322,11 @@ export const App: React.FC = () => {
       offset += unknownBytes;
       predVoxelsRef.current = decodeVoxels(predFloats, predCount);
       gtVoxelsRef.current = decodeVoxels(gtFloats, gtCount);
+      setDrawSample((prev) => {
+        const next = { pred: predCount > DRAW_CAP, gt: gtCount > DRAW_CAP, compare: prev.compare };
+        if (prev.pred === next.pred && prev.gt === next.gt && prev.compare === next.compare) return prev;
+        return next;
+      });
       errorVoxelsRef.current = decodeVoxels(errFloats, errCount);
       freeVoxelsRef.current = decodeVoxels(freeFloats, freeCount);
       unknownVoxelsRef.current = decodeVoxels(unknownFloats, unknownCount);
@@ -328,8 +335,14 @@ export const App: React.FC = () => {
         const compareFloats = new Float32Array(buffer, offset, compareCount * 4);
         compareVoxelsRef.current = decodeVoxels(compareFloats, compareCount);
         offset += compareBytes;
+        setDrawSample((prev) => {
+          const next = { ...prev, compare: compareCount > DRAW_CAP };
+          if (prev.compare === next.compare) return prev;
+          return next;
+        });
       } else {
         compareVoxelsRef.current = [];
+        setDrawSample((prev) => (prev.compare ? { ...prev, compare: false } : prev));
       }
       const takeProtocol = (count: number) => {
         const bytes = count * 16;
@@ -541,6 +554,13 @@ export const App: React.FC = () => {
       activeModel={source}
       onModelChange={onSource}
       voxelsRef={cloudFor(source)}
+      sampled={
+        source === GROUND_TRUTH
+          ? drawSample.gt
+          : compareModel && source === compareModel
+            ? drawSample.compare
+            : drawSample.pred
+      }
       voxelSize={controls.voxelSize}
       opacity={controls.opacity}
       maxRange={controls.maxRange}
