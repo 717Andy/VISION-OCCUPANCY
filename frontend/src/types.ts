@@ -130,6 +130,9 @@ export interface DistanceZone {
   label: string;
   miou: number | null;
   error: number | null;
+  tp?: number;
+  fp?: number;
+  fn?: number;
 }
 
 export interface MiouDrop {
