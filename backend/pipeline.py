@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 GRID_X, GRID_Y, GRID_Z = 32, 32, 16
 OCCUPANCY_CACHE_LIMIT = 48
+KNOWN_SPACE_CACHE_LIMIT = 16
 
 
 class PerceptionPipeline:
@@ -49,6 +50,9 @@ class PerceptionPipeline:
         self.engine = depth_engine if depth_engine is not None else MidasDepthEngine()
         self._occupancy_cache: OrderedDict[tuple[int, float, float], tuple[bytes, float, dict[str, Any]]] = OrderedDict()
         self._benchmark_cache: OrderedDict[tuple[int, float], dict[str, Any]] = OrderedDict()
+        self._known_space_cache: OrderedDict[
+            tuple, tuple[np.ndarray, np.ndarray, np.ndarray]
+        ] = OrderedDict()
         self._cache_lock = threading.Lock()
         self._benchmark_compute_lock = threading.Lock()
 
@@ -164,8 +168,8 @@ class PerceptionPipeline:
     ) -> bytes:
         points = load_lidar_ego_points(frame_index) if lidar_points is None else lidar_points
         cameras = self._cameras_for_frame(frame_index)
-        occupied, free, weights = camera_known_space(
-            points, cameras, voxel_size, origin=EGO_BOUNDS[:, 0]
+        occupied, free, weights = self._known_space(
+            frame_index, voxel_size, points, cameras, cache=lidar_points is None
         )
         self._record_known_score(
             pred_centers,
@@ -214,6 +218,34 @@ class PerceptionPipeline:
         return self._pack_with_lidar(
             frame_index, pred_centers, pred_occ, voxel_size, lidar_points
         )
+
+    def _known_space(
+        self,
+        frame_index: int,
+        voxel_size: float,
+        points: np.ndarray,
+        cameras: list[dict[str, Any]] | None,
+        *,
+        cache: bool,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Camera-visible occupied and free cells. The stored clip is cached."""
+        if not cache:
+            return camera_known_space(points, cameras, voxel_size, origin=EGO_BOUNDS[:, 0])
+        from nuscenes_loader import get_scene
+
+        key = (get_scene(), int(frame_index), round(float(voxel_size), 3), cameras is not None)
+        with self._cache_lock:
+            cached = self._known_space_cache.get(key)
+            if cached is not None:
+                self._known_space_cache.move_to_end(key)
+                return cached
+        grids = camera_known_space(points, cameras, voxel_size, origin=EGO_BOUNDS[:, 0])
+        with self._cache_lock:
+            self._known_space_cache[key] = grids
+            self._known_space_cache.move_to_end(key)
+            while len(self._known_space_cache) > KNOWN_SPACE_CACHE_LIMIT:
+                self._known_space_cache.popitem(last=False)
+        return grids
 
     def _registry_occupancy(self, frame_index: int, voxel_size: float, model: str) -> bytes:
         """Draw one registered predictor. MiDaS is handled by the depth path."""

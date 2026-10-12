@@ -51,6 +51,7 @@ interface VoxelCanvasProps {
   models?: string[];
   activeModel?: string;
   onModelChange?: (model: string) => void;
+  sampled?: boolean;
 }
 
 const MAX_INSTANCES = 900;
@@ -507,6 +508,7 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
   models,
   activeModel,
   onModelChange,
+  sampled = false,
 }) => {
   const claimRef = useRef<PressClaim | null>(null);
   const selectOverlay = onOverlaySelect ?? onSelect;
@@ -548,6 +550,9 @@ export const VoxelCanvas: React.FC<VoxelCanvasProps> = ({
           ))}
         </div>
       </div>
+      {sampled && (
+        <p className="sample-note">Showing 900 cubes. The cloud is denser than this view.</p>
+      )}
       <div className="voxel-stage">
         <Canvas camera={{ position: [12, 10, -22], fov: 50 }}>
           <color attach="background" args={['#0d1117']} />

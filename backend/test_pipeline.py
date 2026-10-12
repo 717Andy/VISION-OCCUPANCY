@@ -127,6 +127,42 @@ class BenchmarkTimingTests(unittest.TestCase):
         self.assertIsNone(pipeline.cached_benchmark(0, 0.38))
 
 
+class KnownSpaceCacheTests(unittest.TestCase):
+    def test_known_space_is_reused_for_the_same_scene_frame_and_voxel(self):
+        import pipeline as pipeline_mod
+        from nuscenes_loader import TRAINING_SCENE, get_scene, scene_context
+
+        calls = {"n": 0}
+        original = pipeline_mod.camera_known_space
+
+        def fake(points, cameras, voxel_size, origin=None):
+            del points, cameras, voxel_size, origin
+            calls["n"] += 1
+            return (
+                np.zeros((1, 3), dtype=np.float32),
+                np.zeros((0, 3), dtype=np.float32),
+                np.ones((1,), dtype=np.float32),
+            )
+
+        pipeline_mod.camera_known_space = fake
+        try:
+            pipe = PerceptionPipeline()
+            points = np.zeros((1, 3), dtype=np.float32)
+            pipe._known_space(0, 0.2, points, [], cache=True)
+            pipe._known_space(0, 0.2, points, [], cache=True)
+            self.assertEqual(calls["n"], 1)
+            pipe._known_space(0, 0.5, points, [], cache=True)
+            self.assertEqual(calls["n"], 2)
+            with scene_context("scene-1094"):
+                pipe._known_space(0, 0.2, points, [], cache=True)
+            self.assertEqual(calls["n"], 3)
+            pipe._known_space(0, 0.2, points, [], cache=False)
+            self.assertEqual(calls["n"], 4)
+        finally:
+            pipeline_mod.camera_known_space = original
+            self.assertEqual(get_scene(), TRAINING_SCENE)
+
+
 class ManifestPathTests(unittest.TestCase):
     def test_known_camera_ids(self):
         self.assertEqual(len(CAMERA_IDS), 6)
