@@ -48,6 +48,42 @@ class SceneRootTests(unittest.TestCase):
             self.assertGreater(camera["iou"], 0.0)
             self.assertNotIn("error", camera)
 
+    def test_prediction_cache_does_not_cross_scenes(self):
+        import numpy as np
+
+        from ipm_baseline import _CENTER_CACHE as ipm_cache
+        from ipm_baseline import predict_centers as ipm_centers
+        from stereo_baseline import _CENTER_CACHE as stereo_cache
+        from stereo_baseline import predict_centers as stereo_centers
+        from voxnet_baseline import _PRED_CACHE
+        from voxnet_baseline import predict_centers as voxnet_centers
+
+        boston = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+        night = np.array([[9.0, 0.0, 0.0]], dtype=np.float32)
+        _PRED_CACHE.clear()
+        ipm_cache.clear()
+        stereo_cache.clear()
+        _PRED_CACHE[("scene-0103", 0)] = boston
+        _PRED_CACHE[("scene-1094", 0)] = night
+        ipm_cache[("scene-0103", 0, 1.0)] = boston
+        ipm_cache[("scene-1094", 0, 1.0)] = night
+        stereo_cache[("scene-0103", 0, 1.0)] = boston
+        stereo_cache[("scene-1094", 0, 1.0)] = night
+        try:
+            with scene_context("scene-0103"):
+                self.assertEqual(float(voxnet_centers(0)[0, 0]), 1.0)
+                self.assertEqual(float(ipm_centers(0, 1.0)[0, 0]), 1.0)
+                self.assertEqual(float(stereo_centers(0, 1.0)[0, 0]), 1.0)
+            with scene_context("scene-1094"):
+                self.assertEqual(float(voxnet_centers(0)[0, 0]), 9.0)
+                self.assertEqual(float(ipm_centers(0, 1.0)[0, 0]), 9.0)
+                self.assertEqual(float(stereo_centers(0, 1.0)[0, 0]), 9.0)
+        finally:
+            _PRED_CACHE.clear()
+            ipm_cache.clear()
+            stereo_cache.clear()
+            self.assertEqual(get_scene(), TRAINING_SCENE)
+
     def test_listed_scenes_mark_only_the_training_clip(self):
         names = {row["name"]: row for row in list_scenes()}
         self.assertEqual(
