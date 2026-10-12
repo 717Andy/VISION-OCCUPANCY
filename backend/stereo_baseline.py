@@ -133,15 +133,17 @@ def predict_points(frame_index: int) -> np.ndarray:
     return np.concatenate(clouds, axis=0).astype(np.float32, copy=False)
 
 
-_CENTER_CACHE: dict[tuple[int, float], np.ndarray] = {}
+_CENTER_CACHE: dict[tuple[str, int, float], np.ndarray] = {}
 
 
 def predict_centers(frame_index: int, voxel_m: float = 1.0) -> np.ndarray:
     """Occupied cells that contain a triangulated stereo point."""
-    key = (int(frame_index), round(float(voxel_m), 3))
+    from nuscenes_loader import get_scene
+
+    key = (get_scene(), int(frame_index), round(float(voxel_m), 3))
     cached = _CENTER_CACHE.get(key)
     if cached is not None:
         return cached
-    centers = cell_centers(predict_points(key[0]), key[1])
+    centers = cell_centers(predict_points(key[1]), key[2])
     _CENTER_CACHE[key] = centers
     return centers

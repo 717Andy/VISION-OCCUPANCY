@@ -89,7 +89,7 @@ class VoxNetOccupancy(nn.Module):
 
 
 _RUNTIME: dict[str, object] | None = None
-_PRED_CACHE: OrderedDict[int, np.ndarray] = OrderedDict()
+_PRED_CACHE: OrderedDict[tuple[str, int], np.ndarray] = OrderedDict()
 _PRED_CACHE_LIMIT = 8
 
 
@@ -224,10 +224,13 @@ def load_baseline() -> dict[str, object]:
 
 def predict_centers(frame_index: int) -> np.ndarray:
     """Occupied cell centers from the 3D CNN. Lidar is not read here."""
+    from nuscenes_loader import get_scene
+
     index = int(frame_index)
-    cached = _PRED_CACHE.get(index)
+    key = (get_scene(), index)
+    cached = _PRED_CACHE.get(key)
     if cached is not None:
-        _PRED_CACHE.move_to_end(index)
+        _PRED_CACHE.move_to_end(key)
         return cached
     runtime = load_baseline()
     model: VoxNetOccupancy = runtime["model"]  # type: ignore[assignment]
@@ -240,7 +243,7 @@ def predict_centers(frame_index: int) -> np.ndarray:
         prob = torch.sigmoid(logits)[0, 0]
         mask = (prob >= float(runtime["threshold"])).cpu().numpy()
     predicted = _centers_from_mask(mask, centers_np, shape)
-    _PRED_CACHE[index] = predicted
+    _PRED_CACHE[key] = predicted
     while len(_PRED_CACHE) > _PRED_CACHE_LIMIT:
         _PRED_CACHE.popitem(last=False)
     return predicted
