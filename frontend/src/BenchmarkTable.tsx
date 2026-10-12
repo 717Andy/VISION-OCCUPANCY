@@ -57,7 +57,8 @@ export const BenchmarkTable: React.FC<{
   onSelectRun?: (id: string) => void;
   viewingModel?: string;
   scene?: string;
-}> = ({ table, runs = [], selectedRun = null, onSelectRun, viewingModel, scene }) => {
+  frameIndex?: number;
+}> = ({ table, runs = [], selectedRun = null, onSelectRun, viewingModel, scene, frameIndex }) => {
   const [chosen, setChosen] = useState<string[]>(DEFAULT_COMPARE);
   const [reference, setReference] = useState('Lift-Splat');
   const [crossScene, setCrossScene] = useState<CrossSceneProtocol | null>(null);
@@ -77,6 +78,7 @@ export const BenchmarkTable: React.FC<{
     viewingRow && typeof viewingRow.iou === 'number' && Number.isFinite(viewingRow.iou)
       ? viewingRow.iou.toFixed(3)
       : null;
+  const frameReady = table != null && (frameIndex == null || table.frame_index === frameIndex);
   const protocolTitle = `${(table?.voxel_m ?? 1).toFixed(1)} m protocol · exact cells · unknown ignored`;
   const held = table?.heldout;
   const heldScores = heldScoresFor(held, compared);
@@ -105,10 +107,14 @@ export const BenchmarkTable: React.FC<{
       )}
       {table && table.rows.length > 0 && (
         <>
-      <p className="bench-meta">
-        Frame {table.frame_index} · {table.split}
-      </p>
-      {viewingModel && !viewingCompared && (
+      {frameReady ? (
+        <p className="bench-meta">
+          Frame {table.frame_index} · {table.split}
+        </p>
+      ) : (
+        <p className="bench-note">Scoring frame {frameIndex ?? table.frame_index}…</p>
+      )}
+      {frameReady && viewingModel && !viewingCompared && (
         <p className="bench-note viewing-chip">
           Now viewing {viewingModel} · protocol IoU {viewingScore ?? '—'}
         </p>
@@ -185,7 +191,7 @@ export const BenchmarkTable: React.FC<{
           </p>
         </section>
       )}
-      <table>
+      {frameReady && <table>
         <thead>
           <tr>
             <th>Pipeline</th>
@@ -219,7 +225,7 @@ export const BenchmarkTable: React.FC<{
             </tr>
           ))}
         </tbody>
-      </table>
+      </table>}
       <p className="bench-note">
         IoU = TP / (TP + FP + FN) on exact {table.voxel_m.toFixed(1)} m cells. Unknown cells are
         ignored. Band mIoU averages the height bands below 0.45 m, 0.45 to 2.3 m, and above 2.3 m.

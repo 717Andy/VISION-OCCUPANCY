@@ -108,6 +108,25 @@ class OccupancyTensorTests(unittest.TestCase):
         self.assertLess(elapsed, 0.02, f"occupancy generation took {elapsed:.4f}s")
 
 
+class BenchmarkTimingTests(unittest.TestCase):
+    def test_occupancy_does_not_score_the_protocol_table(self):
+        pipeline = PerceptionPipeline()
+
+        def refuse(*_args, **_kwargs):
+            raise AssertionError("protocol table scored during occupancy")
+
+        pipeline._refresh_benchmark = refuse
+
+        def fake(frame_index, voxel_size=0.2, threshold=0.38, model="Monocular depth"):
+            del frame_index, voxel_size, threshold, model
+            return b"\x00" * 20
+
+        pipeline._registry_occupancy = fake
+        payload = pipeline.occupancy_for_frame(0, 0.2, 0.38, "VoxNet 3D CNN")
+        self.assertEqual(payload, b"\x00" * 20)
+        self.assertIsNone(pipeline.cached_benchmark(0, 0.38))
+
+
 class ManifestPathTests(unittest.TestCase):
     def test_known_camera_ids(self):
         self.assertEqual(len(CAMERA_IDS), 6)

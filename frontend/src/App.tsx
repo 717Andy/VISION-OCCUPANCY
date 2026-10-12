@@ -366,6 +366,7 @@ export const App: React.FC = () => {
               distance_zones?: DistanceZone[];
               miou_drop?: MiouDrop;
             };
+            frame_index?: number;
             benchmark?: BenchmarkTableData | null;
             compare_count?: number;
             protocol_fp_count?: number;
@@ -402,9 +403,14 @@ export const App: React.FC = () => {
             } else if (typeof msg.miou === 'number' && Number.isFinite(msg.miou)) {
               setMiou(msg.miou.toFixed(2));
             }
-            if ('benchmark' in msg) {
-              setBenchmark(msg.benchmark ?? null);
+            if (msg.benchmark) {
+              setBenchmark(msg.benchmark);
             }
+          }
+          if (msg.type === 'benchmark') {
+            if (msg.scene && msg.scene !== sceneRef.current) return;
+            if (typeof msg.frame_index === 'number' && msg.frame_index !== frameIndexRef.current) return;
+            setBenchmark(msg.benchmark ?? null);
           }
         } catch {
           /* ignore malformed control frames */
@@ -504,9 +510,9 @@ export const App: React.FC = () => {
 
   const protocolIou = useMemo(() => {
     const row = benchmark?.rows.find((item) => item.pipeline === scoringModel);
-    if (!benchmark || !row || typeof row.iou !== 'number' || !Number.isFinite(row.iou)) return '—';
+    if (!benchmark || benchmark.frame_index !== frameIndex || !row || typeof row.iou !== 'number' || !Number.isFinite(row.iou)) return '—';
     return `${row.iou.toFixed(3)} (${benchmark.voxel_m.toFixed(1)} m)`;
-  }, [benchmark, scoringModel]);
+  }, [benchmark, scoringModel, frameIndex]);
 
   const highlightCamera = selected
     ? camerasSeeingPoint(

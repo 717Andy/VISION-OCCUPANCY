@@ -268,7 +268,9 @@ async def occupancy_websocket(websocket: WebSocket):
 
                 def build_frame():
                     with scene_context(active_scene):
-                        return _build_scene_frame(idx, vs, th, selected, compare)
+                        payload_counts = _build_scene_frame(idx, vs, th, selected, compare)
+                        ready = pipeline.cached_benchmark(idx, th)
+                        return payload_counts, ready
 
                 def _build_scene_frame(idx, vs, th, selected, compare):
                     from benchmark import pack_protocol_errors
@@ -290,9 +292,10 @@ async def occupancy_websocket(websocket: WebSocket):
                     payload = payload + protocol + compare_protocol
                     return payload, compare_count, fp_count, fn_count, compare_fp_count, compare_fn_count
 
-                payload, compare_count, fp_count, fn_count, compare_fp_count, compare_fn_count = (
-                    await asyncio.to_thread(build_frame)
-                )
+                (
+                    (payload, compare_count, fp_count, fn_count, compare_fp_count, compare_fn_count),
+                    ready_benchmark,
+                ) = await asyncio.to_thread(build_frame)
                 elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                 await websocket.send_text(
                     json.dumps(
@@ -308,7 +311,7 @@ async def occupancy_websocket(websocket: WebSocket):
                             "miou": pipeline.last_miou,
                             "metric": pipeline.last_metric,
                             "gt_source": pipeline.gt_source,
-                            "benchmark": pipeline.last_benchmark,
+                            "benchmark": ready_benchmark,
                             "compare_model": compare or None,
                             "compare_count": compare_count,
                             "protocol_fp_count": fp_count,
@@ -319,6 +322,34 @@ async def occupancy_websocket(websocket: WebSocket):
                     )
                 )
                 await websocket.send_bytes(payload)
+                if ready_benchmark is None:
+                    score_scene = active_scene
+                    score_index = idx
+                    score_threshold = th
+
+                    async def send_benchmark() -> None:
+                        def score() -> dict | None:
+                            with scene_context(score_scene):
+                                return pipeline.ensure_benchmark(score_index, score_threshold)
+
+                        table = await asyncio.to_thread(score)
+                        if frame_index != score_index or scene != score_scene:
+                            return
+                        try:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "benchmark",
+                                        "scene": score_scene,
+                                        "frame_index": score_index,
+                                        "benchmark": table,
+                                    }
+                                )
+                            )
+                        except Exception:
+                            return
+
+                    asyncio.create_task(send_benchmark())
             else:
                 await asyncio.sleep(0.03)
     except WebSocketDisconnect:

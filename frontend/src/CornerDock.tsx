@@ -180,6 +180,7 @@ export const CornerDock: React.FC<{
               onSelectRun={onSelectRun}
               viewingModel={viewingModel}
               scene={scene}
+              frameIndex={frameIndex}
             />
           )}
           {chartOpen && (
