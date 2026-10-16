@@ -4,6 +4,8 @@ Compare camera-based 3D occupancy with lidar you can see. Six surround cameras g
 
 ![Six cameras, a 3D occupancy cloud, and the protocol table across four scenes](docs/workbench.png)
 
+![Split view of scene-0103, Boston seaport. Lidar ground truth on the left, VoxNet on the right.](docs/split-gt-voxnet.png)
+
 **Stack:** React, TypeScript, Three.js, FastAPI, PyTorch, NumPy.
 
 ## Results
